@@ -56,8 +56,8 @@ const res = { load: [], idle: [], pick: [], nuke: [], quake: [], upload: [] };
 for (let run = 0; run < RUNS; run++) {
   // upload micro-benchmark (synchronised frame time in a 128x80 canvas, so rasterisation is negligible)
   { const page = await open(); await startGame(page);
-    const b = await page.evaluate(() => [0, 1, 200, 4497].map(n => __smash.bench(n)));
-    res.upload.push({ clean_ms: r2(b[0]), dirty1_ms: r2(b[1]), dirty200_ms: r2(b[2]), dirty_all_ms: r2(b[3]) });
+    const b = await page.evaluate(() => [[0], [1], [200, 15, true], [200], [4497]].map(a => __smash.bench(...a)));
+    res.upload.push({ clean_ms: r2(b[0]), dirty1_ms: r2(b[1]), dirty200_near_ms: r2(b[2]), dirty200_spread_ms: r2(b[3]), dirty_all_ms: r2(b[4]) });
     await page.close(); }
   if (ONLY === 'upload') { process.stderr.write(`run ${run + 1}/${RUNS} done\n`); continue }
   // load + idle + pick

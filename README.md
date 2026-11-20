@@ -7,11 +7,25 @@ An unofficial fan game: wreck a 3D model of SCAD's Savannah campus built from Op
 ## 실행
 
 ```bash
-npm run serve        # http://localhost:8765
-npm install && npm test
+npm install
+npm run dev          # 개발 서버 http://localhost:8765
+npm test             # 지오메트리·데이터 테스트 (node)
+npm run build        # dist/ 에 정적 파일 생성
+npm run preview      # dist/ 를 http://localhost:8765 로 확인
+npm run e2e          # preview 를 띄운 상태에서 브라우저 스모크 테스트 (Playwright)
+npm run perf         # preview 를 띄운 상태에서 성능 측정 (docs/perf.md 참고)
 ```
 
-빌드 단계가 없다. `web/`은 정적 파일 3개(`index.html`, `geom.js`, `scad-savannah.json`)이고, three.js r147과 OrbitControls는 jsDelivr CDN에서 불러온다.
+Vite 프로젝트다. 루트는 `web/`이고 three.js는 npm 패키지(정확한 버전 고정)로 번들한다. `npm run build` 결과는 `dist/`의 정적 파일(`index.html`, `assets/*.js`, `scad-savannah.json`)뿐이고 서버 코드는 없다.
+
+| 파일 | 내용 |
+|---|---|
+| `web/index.html` | HUD 마크업과 CSS |
+| `web/src/main.js` | 게임 전체(three.js 씬, 무기, 점수, 파티클, 사운드) |
+| `web/geom.js` | 순수 지오메트리 ES 모듈. 게임과 node 테스트가 같이 쓴다 |
+| `web/public/scad-savannah.json` | 건물·도로·공원·물 데이터 |
+
+주소 뒤에 `?perf`를 붙이면 측정용 훅(`window.__smash`)이 켜진다. 붙이지 않으면 게임 동작은 같다.
 
 ## 데이터 다시 만들기
 
@@ -24,7 +38,7 @@ npm run data
 | OSM 타일 49개 다운로드 (API 0.6) | `tools/fetch_osm_tiles.sh` | `data/tiles/*.osm` (약 40MB, git 제외) |
 | 노드·웨이·릴레이 병합 | `tools/parse_osm.py` | `data/raw.json` (git 제외) |
 | 도로·공원·연못·사바나강 | `tools/build_ground.py` | `data/ground.json` (git 제외) |
-| 건물 + 3D 태그 | `tools/build_buildings.py` | `web/scad-savannah.json` |
+| 건물 + 3D 태그 | `tools/build_buildings.py` | `web/public/scad-savannah.json` |
 
 범위는 위도 32.044~32.086, 경도 -81.112~-81.082이다. SCAD 건물에서 320m 이내 건물만 남긴다.
 
@@ -48,4 +62,4 @@ SCAD 판정 기준: 이름이나 operator에 SCAD 또는 Savannah College of Art
 
 ## 라이선스와 출처
 
-지도 데이터 © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/). `web/scad-savannah.json`은 OSM 파생 데이터베이스이므로 ODbL을 따른다.
+지도 데이터 © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/). `web/public/scad-savannah.json`은 OSM 파생 데이터베이스이므로 ODbL을 따른다.

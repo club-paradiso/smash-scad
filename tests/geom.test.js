@@ -1,9 +1,10 @@
 // Roof geometry checks: run with `npm test` (node >= 18).
-const test = require('node:test');
-const assert = require('node:assert');
-const THREE = require('three');
-const SG = require('../web/geom.js');
-const D = require('../web/scad-savannah.json');
+import test from 'node:test';
+import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import * as THREE from 'three';
+import SG from '../web/geom.js';
+const D = JSON.parse(readFileSync(new URL('../web/public/scad-savannah.json', import.meta.url)));
 
 const footArea = f => { let s = 0; for (let i = 0; i < f.length; i += 2) { const j = (i + 2) % f.length; s += f[i] * f[j + 1] - f[j] * f[i + 1] } return Math.abs(s) / 2 };
 function roofStats(g) {
