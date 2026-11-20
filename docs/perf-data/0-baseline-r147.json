@@ -213,5 +213,6 @@
    }
   ]
  },
- "console_errors": []
+ "console_errors": [],
+ "upload_note": "summary.upload/raw.upload here come from the first version of the upload benchmark (full city drawn, 15 frames), which was too noisy. They are superseded by 0-baseline-r147-upload.json (one triangle drawn, 30 frames)."
 }

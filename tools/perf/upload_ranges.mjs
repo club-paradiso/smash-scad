@@ -1,4 +1,5 @@
-// How many vertex ranges a blast dirties, with the OSM vertex order vs the spatial (tile) order.
+// How many vertex ranges a blast dirties: OSM vertex order, tile order sorted big-first (tried and dropped),
+// and the shipped tile order (400 m cells, OSM order inside a cell).
 // Mirrors rangeTracker() in web/src/main.js. Run: node tools/perf/upload_ranges.mjs
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
@@ -14,6 +15,7 @@ function layout(order) { const vs = new Array(n); let p = 0; for (const k of ord
 const osm = layout([...Array(n).keys()]);
 const TILE = 400, OFF = 4000, tile = k => Math.floor((Z[k] + OFF) / TILE) * 1000 + Math.floor((X[k] + OFF) / TILE);
 const sp = layout([...Array(n).keys()].sort((a, b) => tile(a) - tile(b) || R[b] - R[a] || a - b));
+const shipped = layout([...Array(n).keys()].sort((a, b) => tile(a) - tile(b) || a - b));
 function ranges(ks, vs, GAP = 512, MAXR = 96, FULL = .5) {
   const l = [...ks].sort((a, b) => vs[a] - vs[b]); const Rr = []; let s = -1, e = -1, cov = 0;
   for (const k of l) { const a = vs[k], b = a + cnt[k]; if (s < 0) { s = a; e = b } else if (a - e <= GAP) e = Math.max(e, b); else { Rr.push([s, e]); cov += e - s; s = a; e = b } }
@@ -22,6 +24,6 @@ function ranges(ks, vs, GAP = 512, MAXR = 96, FULL = .5) {
 }
 for (const [name, r] of [['bomb', 30], ['meteor', 85], ['nuke', 320], ['quake', 480]]) {
   const ks = []; for (let k = 0; k < n; k++) { const d = Math.hypot(X[k] - tx, Z[k] - tz) - (name === 'quake' ? 0 : R[k] * .6); if (d < r) ks.push(k) }
-  console.log(`${name.padEnd(6)} r=${r}m buildings=${String(ks.length).padStart(4)} | OSM order: ${ranges(ks, osm)} | spatial: ${ranges(ks, sp)}`);
+  console.log(`${name.padEnd(6)} r=${r}m buildings=${String(ks.length).padStart(4)}\n  OSM order:            ${ranges(ks, osm)}\n  tile, big first:      ${ranges(ks, sp)}\n  tile, OSM (shipped):  ${ranges(ks, shipped)}`);
 }
 console.log('full upload per attribute:', (nv * 12 / 1024).toFixed(0), 'KB');

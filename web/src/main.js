@@ -90,9 +90,11 @@ function buildGroundLayers(D){
       rd.push(x1+nx,.07,z1+nz,x1-nx,.07,z1-nz,x2+nx,.07,z2+nz, x2+nx,.07,z2+nz,x1-nx,.07,z1-nz,x2-nx,.07,z2-nz)}}
   const rm=flatMesh(rd,0);rm.material.color.setHex(0x8a857c);
 }
+const TILE=400,TILE_OFF=4000,tiles=[];
+const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
   const B=D.b;nB=B.length;
-  const P=[],FB=[],SH=[];
+  const P=[],FB=[],SH=[],G=[];
   bS=new Uint8Array(nB);bH=new Float32Array(nB);bX=new Float32Array(nB);bZ=new Float32Array(nB);bR=new Float32Array(nB);
   bHp=new Float32Array(nB);bMax=new Float32Array(nB);bAlive=new Uint8Array(nB).fill(1);bName=[];
   vStart=new Uint32Array(nB);vCount=new Uint32Array(nB);wallC=[];roofC=[];baseW=[];baseR=[];
@@ -109,6 +111,12 @@ function buildCity(D){
     const w=s?new THREE.Color().setHSL(.13,.95,.52+v*.06):(tw||new THREE.Color().setHSL(.08+v*.05,.18+v*.12,.78+v*.1));
     const rf=s?(rec[7]?new THREE.Color().setHSL(.07,.7,.42):new THREE.Color().setHSL(.12,1,.6)):(tr||(rec[7]?new THREE.Color().setHSL(.03+v*.04,.35,.42+v*.1):w.clone().multiplyScalar(.86)));
     baseW[k]=w;baseR[k]=rf;wallC[k]=w.clone();roofC[k]=rf.clone();
+    G[k]=g;
+  }
+  // Vertex layout is grouped by TILE-metre cell so each cell is one contiguous range (see buildTiles).
+  // Inside a cell buildings keep OSM order; building indices k (scores, names, list, zones) are unchanged.
+  const order=[...Array(nB).keys()].sort((a,b)=>tileOf(a)-tileOf(b)||a-b);
+  for(const k of order){const g=G[k];
     vStart[k]=P.length/3;
     for(let i=0;i<g.pos.length;i++)P.push(g.pos[i]);for(let i=0;i<g.shade.length;i++)SH.push(g.shade[i]);
     for(let t=0;t<g.pos.length/9;t++)FB.push(k);
@@ -125,12 +133,29 @@ function buildCity(D){
   for(let k=0;k<nB;k++)paintB(k);
   const mat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
   mat.onBeforeCompile=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
-  city=new THREE.Mesh(geo,mat);scene.add(city);
+  city=new THREE.Mesh(geo,mat);buildTiles(order,mat);
   // Tap picking goes through a BVH instead of testing all 115k triangles. indirect:true keeps the geometry
   // non-indexed and in its original order, so faceIndex still maps to a building through faceB.
   // The BVH is built from the uncollapsed positions, as the plain raycast was (aL only moves vertices in the shader).
   const t0=performance.now();geo.boundsTree=new MeshBVH(geo,{indirect:true});city.raycast=acceleratedRaycast;PT.extraInit=performance.now()-t0;
   return B.reduce((a,r)=>{a.shaped+=r[7]?1:0;a.measured+=r[11]?0:1;return a},{shaped:0,measured:0});
+}
+// One mesh per cell, all sharing the city's attribute buffers (uploaded once), each with its own draw range and
+// bounding sphere so three can frustum-cull cells; the camera usually sees about a third of the city.
+// `city` itself is not drawn; it is the full mesh used for picking.
+// (A distance LOD that skipped small far buildings was tried on top of this and measured no gain, so it was removed.)
+function buildTiles(order,mat){
+  const pos=geo.attributes.position,v=new THREE.Vector3();
+  for(let i=0;i<order.length;){
+    const key=tileOf(order[i]);let j=i;while(j<order.length&&tileOf(order[j])===key)j++;
+    const ks=order.slice(i,j),start=vStart[ks[0]],end=vStart[ks[ks.length-1]]+vCount[ks[ks.length-1]];
+    const box=new THREE.Box3();for(let q=start;q<end;q++)box.expandByPoint(v.fromBufferAttribute(pos,q));
+    const sph=box.getBoundingSphere(new THREE.Sphere());sph.radius+=box.max.y*.25; // room for a collapsing building's lean
+    const g=new THREE.BufferGeometry();for(const n of ['position','normal','color','aL'])g.setAttribute(n,geo.getAttribute(n));
+    g.setDrawRange(start,end-start);g.boundingSphere=sph;
+    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;scene.add(m);
+    tiles.push({m,g,sph});
+    i=j}
 }
 function paintB(k){
   const d=1-Math.max(0,bHp[k])/bMax[k];const a=col.array;const w=tmpA.copy(wallC[k]).lerp(CHAR,d*.75),r=tmpB.copy(roofC[k]).lerp(CHAR,d*.75);
@@ -363,16 +388,16 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
     pick(cx,cy){const t=performance.now();const r=pickAt(cx,cy);return {ms:performance.now()-t,k:r?r.k:-2}},
     fireAt(id,x,z){weapon=id;cool[id]=0;fire(new THREE.Vector3(x,0,z),-1)},
     target(){return {x:controls.target.x,z:controls.target.z}},
-    info(){const r=renderer.info.render;return {calls:r.calls,triangles:r.triangles,verts:geo.attributes.position.count}},
+    info(){const r=renderer.info.render;return {calls:r.calls,triangles:r.triangles,verts:geo.attributes.position.count,tiles:tiles.length}},
     alive(){let n=0;for(let k=0;k<nB;k++)n+=bAlive[k];return n},nB:()=>nB,
     // upload micro-benchmark: re-dirty nb buildings per frame, draw one triangle of the city into a 128x80 canvas
     // (so vertex shading and rasterising cost ~nothing) and wait for the GPU. What is left is mostly the attribute upload.
-    bench(nb,frames=30,near=false){const sz=new THREE.Vector2();renderer.getSize(sz);renderer.setSize(128,80,false);geo.setDrawRange(0,3);const gl=renderer.getContext(),px=new Uint8Array(4);
+    bench(nb,frames=30,near=false){const sz=new THREE.Vector2();renderer.getSize(sz);renderer.setSize(128,80,false);geo.setDrawRange(0,3);for(const t of tiles)t.m.visible=false;scene.add(city);const gl=renderer.getContext(),px=new Uint8Array(4);
       let ks=[];if(near){const t=controls.target;ks=[...Array(nB).keys()].sort((a,b)=>Math.hypot(bX[a]-t.x,bZ[a]-t.z)-Math.hypot(bX[b]-t.x,bZ[b]-t.z)).slice(0,nb)}
       else for(let k=0;k<nB&&ks.length<nb;k+=Math.max(1,(nB/nb)|0))ks.push(k);const t=[];
       for(let f=0;f<frames+2;f++){for(const k of ks){setL(k,aL.array[vStart[k]*3],aL.array[vStart[k]*3+1],aL.array[vStart[k]*3+2]);paintB(k)}
         const t0=performance.now();flushAttrs();renderer.render(scene,camera);gl.readPixels(0,0,1,1,6408,5121,px);if(f>1)t.push(performance.now()-t0)}
-      geo.setDrawRange(0,Infinity);renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
+      geo.setDrawRange(0,Infinity);scene.remove(city);for(const t of tiles)t.m.visible=true;renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
     hitK(k,amt,paint){return hit(k,amt,paint)},
     particleTest(){const t=controls.target;spawnDebris(t.x,40,t.z,new THREE.Color(0x00ff00),80,0);spawnPuff(t.x+60,30,t.z,0xff00ff,12,12,0)},
     dmg(){let d=0;for(let k=0;k<nB;k++)d+=bMax[k]-Math.max(0,bHp[k]);return d}};

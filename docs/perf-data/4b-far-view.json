@@ -1,0 +1,9 @@
+{
+ "label": "4b-far-view",
+ "note": "Max zoom-out check (40 wheel steps of 600 on the canvas centre, then 4 s settle, 5 s frame log). Two runs per build, 1280x800 @1x, headless Chromium 157, SwiftShader. Copied from the console output of a scratch script (far.mjs), not produced by measure.mjs.",
+ "builds": {
+  "3-bvh (one mesh)": [{"tris": 134513, "calls": 5, "fps": 7.63}, {"tris": 134513, "calls": 5, "fps": 7.43}],
+  "4a tiles + frustum culling": [{"tris": 98746, "calls": 40, "fps": 7.96}, {"tris": 98746, "calls": 40, "fps": 7.88}],
+  "4 tiles + culling + distance LOD (k=0.004)": [{"tris": 91831, "calls": 40, "fps": 7.58}, {"tris": 91831, "calls": 40, "fps": 8.69}]
+ }
+}

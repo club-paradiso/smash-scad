@@ -239,5 +239,6 @@
    }
   ]
  },
- "console_errors": []
+ "console_errors": [],
+ "upload_note": "summary.upload/raw.upload here come from the first version of the upload benchmark (full city drawn, 15 frames), which was too noisy. They are superseded by 1-vite-r187-upload.json (one triangle drawn, 30 frames)."
 }
