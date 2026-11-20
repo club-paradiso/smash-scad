@@ -1,0 +1,46 @@
+{
+ "label": "0-baseline-r147-upload",
+ "date": "2026-11-20T16:11:27.609Z",
+ "env": {
+  "browser": "Chromium 157.0.8103.78 (Playwright, headless)",
+  "viewport": "1280x800 @1x",
+  "gl": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+ },
+ "runs": 3,
+ "summary": {
+  "upload": {
+   "clean_ms": 49.3,
+   "dirty1_ms": 60.4,
+   "dirty200_ms": 54.6,
+   "dirty_all_ms": 56
+  }
+ },
+ "raw": {
+  "load": [],
+  "idle": [],
+  "pick": [],
+  "nuke": [],
+  "quake": [],
+  "upload": [
+   {
+    "clean_ms": 49.3,
+    "dirty1_ms": 60.4,
+    "dirty200_ms": 54.6,
+    "dirty_all_ms": 56
+   },
+   {
+    "clean_ms": 51.3,
+    "dirty1_ms": 60.7,
+    "dirty200_ms": 50.1,
+    "dirty_all_ms": 57
+   },
+   {
+    "clean_ms": 46.3,
+    "dirty1_ms": 60.3,
+    "dirty200_ms": 55.7,
+    "dirty_all_ms": 50.8
+   }
+  ]
+ },
+ "console_errors": []
+}

@@ -164,6 +164,7 @@ const ZONES=[
 const RANKS=[['D',0],['C',3000],['B',12000],['A',35000],['S',90000],['SS',200000],['SSS',450000]];
 const PAINTS=[0xff4b3e,0x3fa9ff,0x2bd47d,0xff7ad9,0x9b5cff,0xff9f1c,0x00d5c8];
 
+const PERF=/[?&]perf\b/.test(location.search),PT={},FR=[];let frRec=false;
 let weapon='bomb',score=0,combo=1,lastKill=0,best=0,muted=false,ready=false;
 const cool={};
 try{best=+localStorage.getItem('smashscad.best')||0}catch(e){}
@@ -259,6 +260,7 @@ function paintB(k){
 }
 const tmpA=new THREE.Color(),tmpB=new THREE.Color();
 let dirtyC=false,dirtyL=false;
+function flushAttrs(){if(dirtyL){aL.needsUpdate=true;dirtyL=false}if(dirtyC){col.needsUpdate=true;dirtyC=false}}
 function setL(k,s,lx,lz){const a=aL.array;for(let v=vStart[k],e=v+vCount[k];v<e;v++){a[v*3]=s;a[v*3+1]=lx;a[v*3+2]=lz}dirtyL=true}
 
 // ---------- particles ----------
@@ -406,11 +408,14 @@ let down=null,pointers=0;
 canvas.addEventListener('pointerdown',e=>{pointers++;down=pointers==1?{x:e.clientX,y:e.clientY,t:performance.now(),b:e.button}:null});
 addEventListener('pointerup',e=>{pointers=Math.max(0,pointers-1);if(!down||!ready)return;const d=down;down=null;
   if(e.target!==canvas||d.b!==0||Math.hypot(e.clientX-d.x,e.clientY-d.y)>9||performance.now()-d.t>450)return;
-  ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);ray.setFromCamera(ndc,camera);
+  const r=pickAt(e.clientX,e.clientY);if(!r)return;
+  audio();fire(r.pt,r.k);hideHint()});
+function pickAt(cx,cy){
+  ndc.set(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);ray.setFromCamera(ndc,camera);
   let k=-1;const pt=new THREE.Vector3();const hits=ray.intersectObject(city,false);
   for(const h of hits){const b=faceB[h.faceIndex];if(bAlive[b]){k=b;pt.copy(h.point);break}}
-  if(k<0&&!ray.ray.intersectPlane(gplane,pt))return;
-  audio();fire(pt,k);hideHint()});
+  if(k<0&&!ray.ray.intersectPlane(gplane,pt))return null;
+  return {k,pt}}
 addEventListener('pointercancel',()=>{pointers=0;down=null});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 let hintT=0;function hideHint(){if(++hintT==3)$('#hint').style.opacity=0}
@@ -437,7 +442,7 @@ $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
 
 // ---------- loop ----------
 let last=performance.now();
-function loop(now){requestAnimationFrame(loop);const dt=Math.min(.05,(now-last)/1000);last=now;
+function loop(now){requestAnimationFrame(loop);const f0=performance.now();const dt=Math.min(.05,(now-last)/1000);last=now;
   camera.position.sub(shakeOff);
   if(fly){fly.t+=dt/1.1;const u=Math.min(1,fly.t),e=u<.5?2*u*u:1-(-2*u+2)**2/2;controls.target.lerpVectors(fly.from,fly.to,e);camera.position.copy(controls.target).add(fly.off);if(u>=1)fly=null}
   controls.target.x=Math.max(-1800,Math.min(1300,controls.target.x));controls.target.z=Math.max(-1500,Math.min(3400,controls.target.z));controls.target.y=0;
@@ -446,18 +451,33 @@ function loop(now){requestAnimationFrame(loop);const dt=Math.min(.05,(now-last)/
   for(let i=collapsing.length-1;i>=0;i--){const c=collapsing[i];c.t+=dt;const u=Math.min(1,c.t/c.dur),e=u*u;setL(c.k,c.s0+(.03-c.s0)*e,c.lx*Math.sin(u*Math.PI)*.6,c.lz*Math.sin(u*Math.PI)*.6);
     if(Math.random()<.4)spawnPuff(bX[c.k],1,bZ[c.k],0xbdb3a3,3+bR[c.k]*.25,1,5);if(u>=1)collapsing.splice(i,1)}
   for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.t+=dt;const u=Math.min(1,f.t/f.dur);f.f(u);if(u>=1){f.end();FX.splice(i,1)}}
-  if(geo){stepProjectiles(dt);stepQuake(dt);stepParticles(dt);if(dirtyL){aL.needsUpdate=true;dirtyL=false}if(dirtyC){col.needsUpdate=true;dirtyC=false}}
+  if(geo){stepProjectiles(dt);stepQuake(dt);stepParticles(dt);flushAttrs()}
   const t=now/1000;for(const b of document.querySelectorAll('.wp')){const w=WEAPONS.find(x=>x.id==b.dataset.w);const rem=(cool[w.id]||0)-t;b.classList.toggle('wait',rem>0);b.querySelector('.cd').style.width=rem>0&&w.cd?rem/w.cd*100+'%':'0'}
   if(hudDirty){hudDirty=false;hud()}
   if(combo>1&&t-lastKill>2.2){combo=1;$('#combo').style.opacity=0}
-  renderer.render(scene,camera)}
+  const f1=performance.now();renderer.render(scene,camera);
+  if(PERF){const f2=performance.now();if(frRec)FR.push([now,f1-f0,f2-f1]);if(geo&&!PT.firstRender){renderer.getContext().readPixels(0,0,1,1,6408,5121,new Uint8Array(4));PT.firstRender=performance.now();PT.firstRenderCall=f2-f1}}}
 requestAnimationFrame(loop);
 
+PT.fetchStart=performance.now();
 fetch('scad-savannah.json').then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(D=>{
-  buildGroundLayers(D);const st=buildCity(D);hud();
+  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();hud();
   const c=centerOf(ZONES[0][1]);if(c){controls.target.set(c.x,0,c.z);camera.position.set(c.x+250,320,c.z+400)}
   ready=true;const g=$('#go');g.disabled=false;g.textContent='Start smashing';
   $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · '+st.measured+' mapped heights';
+  if(PERF)window.__smash={PT,FR,rec(on){frRec=on;if(on)FR.length=0},
+    pick(cx,cy){const t=performance.now();const r=pickAt(cx,cy);return {ms:performance.now()-t,k:r?r.k:-2}},
+    fireAt(id,x,z){weapon=id;cool[id]=0;fire(new THREE.Vector3(x,0,z),-1)},
+    target(){return {x:controls.target.x,z:controls.target.z}},
+    info(){const r=renderer.info.render;return {calls:r.calls,triangles:r.triangles,verts:geo.attributes.position.count}},
+    alive(){let n=0;for(let k=0;k<nB;k++)n+=bAlive[k];return n},nB:()=>nB,
+    // upload micro-benchmark: re-dirty nb buildings per frame, render into a 128x80 canvas and wait for the GPU
+    bench(nb,frames=15){const sz=new THREE.Vector2();renderer.getSize(sz);renderer.setSize(128,80,false);const gl=renderer.getContext(),px=new Uint8Array(4);
+      const ks=[];for(let k=0;k<nB&&ks.length<nb;k+=Math.max(1,(nB/nb)|0))ks.push(k);const t=[];
+      for(let f=0;f<frames+2;f++){for(const k of ks){setL(k,aL.array[vStart[k]*3],aL.array[vStart[k]*3+1],aL.array[vStart[k]*3+2]);paintB(k)}
+        const t0=performance.now();flushAttrs();renderer.render(scene,camera);gl.readPixels(0,0,1,1,6408,5121,px);if(f>1)t.push(performance.now()-t0)}
+      renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
+    dmg(){let d=0;for(let k=0;k<nB;k++)d+=bMax[k]-Math.max(0,bHp[k]);return d}};
 }).catch(err=>{$('#go').textContent='Map failed to load';$('#load').textContent='Could not load the campus data ('+err.message+'). Reload to try again.'});
 }
 </script>
