@@ -36,7 +36,10 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 
 ## 다음 작업 후보 (우선순위 순)
 1. 실기기 성능 측정과 최적화: 손상 시 `aL`·color 전체 업로드를 범위 업데이트로 바꾸기, 거리별 LOD, 피킹용 BVH(three-mesh-bvh)
-2. Vite와 ES 모듈로 전환, three 최신 버전(r160+) 마이그레이션. 그 다음 Vercel 배포
+2. Vite와 ES 모듈로 전환, three 최신 버전(r160+) 마이그레이션. 빌드 결과는 정적 파일로만 남긴다
+
+## 하지 않는 것
+- Vercel 배포 금지(소유자 결정). Vercel 프로젝트 생성·연결·배포 설정 파일(vercel.json 등)을 만들지 않는다. 다른 호스팅에 배포하는 것도 소유자 지시가 있을 때만
 3. 공유 랭킹: 원작처럼 일간·전체 점수(Supabase 등), 1인당 기여 상한, 학교 코드와 점수만 전송
 4. 캠퍼스 확장: SCAD Atlanta, Lacoste. `tools/`의 bbox와 SCAD 판정 규칙을 캠퍼스 설정 파일로 분리
 5. 지형: Savannah는 평지라 생략했지만, 확장 캠퍼스에는 AWS Terrain Tiles(SRTM 30m)가 필요할 수 있음
