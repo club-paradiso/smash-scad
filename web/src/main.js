@@ -1,6 +1,7 @@
 // SMASH SCAD game: UI, three.js scene, weapons, scoring, particles, sound.
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {MeshBVH,acceleratedRaycast} from 'three-mesh-bvh';
 import {building} from '../geom.js';
 
 const $=s=>document.querySelector(s);
@@ -125,6 +126,10 @@ function buildCity(D){
   const mat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
   mat.onBeforeCompile=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
   city=new THREE.Mesh(geo,mat);scene.add(city);
+  // Tap picking goes through a BVH instead of testing all 115k triangles. indirect:true keeps the geometry
+  // non-indexed and in its original order, so faceIndex still maps to a building through faceB.
+  // The BVH is built from the uncollapsed positions, as the plain raycast was (aL only moves vertices in the shader).
+  const t0=performance.now();geo.boundsTree=new MeshBVH(geo,{indirect:true});city.raycast=acceleratedRaycast;PT.extraInit=performance.now()-t0;
   return B.reduce((a,r)=>{a.shaped+=r[7]?1:0;a.measured+=r[11]?0:1;return a},{shaped:0,measured:0});
 }
 function paintB(k){
