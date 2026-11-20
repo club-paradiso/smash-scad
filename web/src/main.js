@@ -120,6 +120,7 @@ function buildCity(D){
   col=new THREE.BufferAttribute(new Float32Array(nv*3),3);geo.setAttribute('color',col);
   aL=new THREE.BufferAttribute(new Float32Array(nv*3),3);for(let i=0;i<nv;i++)aL.array[i*3]=1;geo.setAttribute('aL',aL);
   faceB=Uint16Array.from(FB);
+  dirtyC.bind(col);dirtyL.bind(aL);
   for(let k=0;k<nB;k++)paintB(k);
   const mat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
   mat.onBeforeCompile=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
@@ -129,12 +130,27 @@ function buildCity(D){
 function paintB(k){
   const d=1-Math.max(0,bHp[k])/bMax[k];const a=col.array;const w=tmpA.copy(wallC[k]).lerp(CHAR,d*.75),r=tmpB.copy(roofC[k]).lerp(CHAR,d*.75);
   for(let v=vStart[k],e=v+vCount[k];v<e;v++){const s=shade[v];const c=s<0?r:w;const m=Math.abs(s);a[v*3]=c.r*m;a[v*3+1]=c.g*m;a[v*3+2]=c.b*m}
-  dirtyC=true;
+  dirtyC.add(k);
 }
 const tmpA=new THREE.Color(),tmpB=new THREE.Color();
-let dirtyC=false,dirtyL=false;
-function flushAttrs(){if(dirtyL){aL.needsUpdate=true;dirtyL=false}if(dirtyC){col.needsUpdate=true;dirtyC=false}}
-function setL(k,s,lx,lz){const a=aL.array;for(let v=vStart[k],e=v+vCount[k];v<e;v++){a[v*3]=s;a[v*3+1]=lx;a[v*3+2]=lz}dirtyL=true}
+// Upload only the vertex ranges of buildings that changed this frame, instead of the whole 345k-vertex
+// attribute. Neighbouring ranges closer than GAP vertices are merged; when the merged ranges would cover
+// more than half the buffer, or there are too many of them, one full upload is cheaper.
+function rangeTracker(){
+  const GAP=512,MAXR=96,FULL=.5;let mark=null,list=[],attr=null;
+  return {bind(a){attr=a;mark=new Uint8Array(nB)},
+    add(k){if(!mark[k]){mark[k]=1;list.push(k)}},
+    flush(){if(!list.length)return;list.sort((a,b)=>vStart[a]-vStart[b]);
+      const R=[];let s=-1,e=-1,cov=0;
+      for(const k of list){mark[k]=0;const a=vStart[k],b=a+vCount[k];if(s<0){s=a;e=b}else if(a-e<=GAP)e=Math.max(e,b);else{R.push(s,e);cov+=e-s;s=a;e=b}}
+      R.push(s,e);cov+=e-s;list=[];
+      attr.clearUpdateRanges();
+      if(R.length/2<=MAXR&&cov<attr.count*FULL)for(let i=0;i<R.length;i+=2)attr.addUpdateRange(R[i]*3,(R[i+1]-R[i])*3);
+      attr.needsUpdate=true}};
+}
+const dirtyC=rangeTracker(),dirtyL=rangeTracker();
+function flushAttrs(){dirtyL.flush();dirtyC.flush()}
+function setL(k,s,lx,lz){const a=aL.array;for(let v=vStart[k],e=v+vCount[k];v<e;v++){a[v*3]=s;a[v*3+1]=lx;a[v*3+2]=lz}dirtyL.add(k)}
 
 // ---------- particles ----------
 const MAXD=700,MAXP=360;
