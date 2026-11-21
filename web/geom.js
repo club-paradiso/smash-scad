@@ -54,7 +54,21 @@ function tri(THREE, outer, holes) {
   const all = o.concat(...hs); return t.map(f => f.map(j => all[j]));
 }
 // returns {pos:[x,y,z...], shade:[...]} ; shade >0 = wall (bottom .78, top 1), <0 = roof
+// Measured shape (est=3, rec[12] = {v:[x,z,h,...], t:[i,j,k,...], r:[[ring vertex indices]...]} from tools/lidar_roofs.py):
+// roof = the lidar TIN, walls follow each outline ring from minH up to the measured roof edge.
+function measured(rec) {
+  const { v, t, r } = rec[12], minH = rec[4], pos = [], shade = [];
+  for (const ring of r) for (let i = 0; i < ring.length; i++) {
+    const a = ring[i] * 3, b = ring[(i + 1) % ring.length] * 3;
+    pos.push(v[a], minH, v[a + 1], v[b], minH, v[b + 1], v[b], v[b + 2], v[b + 1], v[a], minH, v[a + 1], v[b], v[b + 2], v[b + 1], v[a], v[a + 2], v[a + 1]);
+    shade.push(.78, .78, 1, .78, 1, 1);
+  }
+  let top = 0;
+  for (let i = 0; i < t.length; i++) { const q = t[i] * 3; pos.push(v[q], v[q + 2], v[q + 1]); shade.push(-1.06); top = Math.max(top, v[q + 2]) }
+  return { pos, shade, top };
+}
 function building(THREE, rec) {
+  if (rec[12]) return measured(rec);
   const [, , oflat, hflat, minH, wallTop, roofH0, shape0, ob] = rec;
   let shape = roofH0 > 0.05 ? shape0 : 0, roofH = shape ? roofH0 : 0;
   const outer = toPts(oflat), holes = hflat.map(toPts);
@@ -94,5 +108,5 @@ function building(THREE, rec) {
   }
   return { pos, shade, top: wallTop + roofH };
 }
-export { building, planesFor, roofZ };
+export { building, measured, planesFor, roofZ };
 export default { building, planesFor, roofZ };

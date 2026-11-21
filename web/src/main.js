@@ -186,8 +186,10 @@ function buildCity(D){
     bMax[k]=bHp[k]=Math.max(40,Math.sqrt(area)*(g.top-minH)*.55);
     const v=(k*2654435761>>>0)%100/100;
     const tw=safeC(rec[9]),tr=safeC(rec[10]);
-    const w=s?new THREE.Color().setHSL(.13,.95,.52+v*.06):(tw||new THREE.Color().setHSL(.08+v*.05,.18+v*.12,.78+v*.1));
-    const rf=s?(rec[7]?new THREE.Color().setHSL(.07,.7,.42):new THREE.Color().setHSL(.12,1,.6)):(tr||(rec[7]?new THREE.Color().setHSL(.03+v*.04,.35,.42+v*.1):w.clone().multiplyScalar(.86)));
+    // Walls: OSM building:colour if tagged, else the same neutral stone/stucco range for every building (SCAD included;
+    // there is no data on real facade colours). SCAD buildings are marked by a yellow roof and their name tag.
+    const w=tw||new THREE.Color().setHSL(.08+v*.05,.18+v*.12,.78+v*.1);
+    const rf=s?new THREE.Color().setHSL(.125,.8,.52+v*.04):(tr||(rec[7]?new THREE.Color().setHSL(.03+v*.04,.35,.42+v*.1):w.clone().multiplyScalar(.86)));
     baseW[k]=w;baseR[k]=rf;wallC[k]=w.clone();roofC[k]=rf.clone();
     G[k]=g;
   }
