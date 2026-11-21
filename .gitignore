@@ -4,3 +4,4 @@ data/raw.json
 data/ground.json
 __pycache__/
 *.png
+dist/

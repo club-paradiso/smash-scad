@@ -213,7 +213,7 @@ for f in foot:
 
 old = json.load(open('data/ground.json'))
 D = {'v': 2, 'b': out, 'r': old['r'], 'p': old['p'], 'w': old['w'], 'river': old['river']}
-json.dump(D, open('web/scad-savannah.json', 'w'), separators=(',', ':'))
+json.dump(D, open('web/public/scad-savannah.json', 'w'), separators=(',', ':'))
 print('buildings', len(out), 'scad', sum(o[0] for o in out), stats)
 import collections
 print(collections.Counter(o[7] for o in out), 'scad shapes', collections.Counter(o[7] for o in out if o[0]),
