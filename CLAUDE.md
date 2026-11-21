@@ -64,5 +64,10 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 7. 한국어 UI 토글
 8. 번들 크기: JS 한 파일 약 850KB(gzip 약 220KB). three 트리 셰이킹 확인
 
+## 배포
+- 라이브 사이트는 GitHub Pages(소유자 결정, 2026-11-21). `.github/workflows/pages.yml`이 `main`에 push될 때 `npm ci` → `npm test` → `npm run build` 후 `dist/`를 Pages에 올린다. 수동 실행(workflow_dispatch)도 된다
+- 한 번만 하는 설정: 리포 Settings → Pages → Source를 "GitHub Actions"로. 리포가 비공개면 Pages는 유료 요금제(Pro/Team/Enterprise)에서만 된다. Pages 사이트는 리포가 비공개여도 공개다(Enterprise 제외)
+- 빌드는 `base: './'`라 `/smash-scad/` 같은 하위 경로에서 그대로 동작한다(스모크·모바일 테스트를 하위 경로로 확인). GPS는 https가 필요한데 Pages는 https다
+
 ## 하지 않는 것
-- Vercel 배포 금지(소유자 결정). Vercel 프로젝트 생성·연결·배포 설정 파일(vercel.json 등)을 만들지 않는다. 다른 호스팅에 배포하는 것도 소유자 지시가 있을 때만
+- Vercel 배포 금지(소유자 결정). Vercel 프로젝트 생성·연결·배포 설정 파일(vercel.json 등)을 만들지 않는다. GitHub Pages 외 다른 호스팅에 배포하는 것도 소유자 지시가 있을 때만

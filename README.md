@@ -27,6 +27,10 @@ Vite 프로젝트다. 루트는 `web/`이고 three.js는 npm 패키지(정확한
 
 주소 뒤에 `?perf`를 붙이면 측정용 훅(`window.__smash`)이 켜진다. 붙이지 않으면 게임 동작은 같다.
 
+## 배포 (GitHub Pages)
+
+`main`에 push되면 GitHub Actions(`.github/workflows/pages.yml`)가 테스트와 빌드를 거쳐 `dist/`를 GitHub Pages에 올린다. 처음 한 번은 리포 Settings → Pages → Source를 "GitHub Actions"로 바꿔야 한다. 비공개 리포는 유료 요금제에서만 Pages를 쓸 수 있다.
+
 ## 데이터 다시 만들기
 
 ```bash
