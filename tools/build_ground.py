@@ -137,7 +137,18 @@ for i,(refs,t) in W.items():
     pts=[P(q) for q in p][:-1]
     c=[sum(q[0] for q in pts)/len(pts), sum(q[1] for q in pts)/len(pts)]
     if len(pts)>=3 and near(c,500): areas.append([k,flat(pts)])
+# named parks and squares (Savannah's squares are leisure=park): [x, z, name, area m2] at the ring centroid
+names=[]
+def ring_area(pts): return abs(sum(pts[k][0]*pts[(k+1)%len(pts)][1]-pts[(k+1)%len(pts)][0]*pts[k][1] for k in range(len(pts))))/2
+for i,(refs,t) in W.items():
+    if t.get('name') and t.get('leisure') in ('park','garden') and refs[0]==refs[-1]:
+        p=ring(refs)
+        if not p: continue
+        pts=[P(q) for q in p][:-1]
+        c=[sum(q[0] for q in pts)/len(pts), sum(q[1] for q in pts)/len(pts)]
+        if len(pts)>=3 and near(c,500): names.append([round(c[0],1),round(c[1],1),t['name'],round(ring_area(pts))])
+print('named parks',len(names))
 print('trees',len(trees),'tree rows',len(rows),'paths',len(paths),'rail',len(rail),'pier lines',len(piers),'areas',len(areas),
       {k:sum(1 for a in areas if a[0]==k) for k in range(7)})
-json.dump({'r':roads,'p':parks,'w':water,'river':river,'t':trees,'tr':rows,'f':paths,'rl':rail,'pl':piers,'a':areas},open('data/ground.json','w'),separators=(',',':'))
+json.dump({'r':roads,'p':parks,'w':water,'river':river,'t':trees,'tr':rows,'f':paths,'rl':rail,'pl':piers,'a':areas,'pn':names},open('data/ground.json','w'),separators=(',',':'))
 print('river pts',len(river)//2, bank[0],bank[-1],isl[0],isl[-1])

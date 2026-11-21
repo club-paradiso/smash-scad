@@ -225,7 +225,7 @@ old = json.load(open('data/ground.json'))
 # trees: [x, z, leaf(1 needle), height m, crown radius m]; height/radius 0 = lidar found no canopy there
 LT = json.load(open('data/lidar_heights.json'))['t'] if os.path.exists('data/lidar_heights.json') else {}
 trees = [t + LT.get(f'{t[0]},{t[1]}', [0, 0]) for t in old['t']]
-D = {'v': 3, 'b': out, 't': trees, **{k: old[k] for k in ('r', 'p', 'w', 'river', 'tr', 'f', 'rl', 'pl', 'a')}}
+D = {'v': 3, 'b': out, 't': trees, **{k: old[k] for k in ('r', 'p', 'w', 'river', 'tr', 'f', 'rl', 'pl', 'a', 'pn')}}
 json.dump(D, open('web/public/scad-savannah.json', 'w'), separators=(',', ':'))
 print('buildings', len(out), 'scad', sum(o[0] for o in out), stats)
 import collections

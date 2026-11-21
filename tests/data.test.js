@@ -8,7 +8,7 @@ const L = JSON.parse(readFileSync(new URL('../data/lidar_heights.json', import.m
 
 test('schema v3 has every layer', () => {
   assert.strictEqual(D.v, 3);
-  for (const k of ['b', 'r', 'p', 'w', 'river', 't', 'tr', 'f', 'rl', 'pl', 'a']) assert.ok(Array.isArray(D[k]), k);
+  for (const k of ['b', 'r', 'p', 'w', 'river', 't', 'tr', 'f', 'rl', 'pl', 'a', 'pn']) assert.ok(Array.isArray(D[k]), k);
 });
 
 test('height source flags are 0 tagged, 1 estimated, 2 lidar, and lidar heights are only on untagged flat roofs', () => {
@@ -36,4 +36,10 @@ test('trees are OSM nodes with lidar height/crown or 0 when not measured', () =>
 
 test('surface areas use known kinds and closed rings', () => {
   for (const [k, f] of D.a) { assert.ok(k >= 0 && k <= 6, String(k)); assert.ok(f.length >= 6 && f.length % 2 === 0) }
+});
+
+test('named squares and parks come from OSM names', () => {
+  const names = D.pn.map(p => p[2]);
+  for (const n of ['Forsyth Park', 'Chippewa Square', 'Madison Square', 'Johnson Square']) assert.ok(names.includes(n), n);
+  for (const [x, z, n, a] of D.pn) assert.ok(Number.isFinite(x) && Number.isFinite(z) && n && a > 0);
 });

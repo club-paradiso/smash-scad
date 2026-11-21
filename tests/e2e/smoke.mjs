@@ -49,6 +49,16 @@ for (const [w, h, mobile] of [[1280, 800, false], [390, 844, true]]) {
     await page.waitForTimeout(800);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${tag}-loaded.png` });
   });
+  await step('real names on the map: SCAD buildings and Savannah squares', async () => {
+    await page.waitForFunction(() => __smash.labels().length > 3, null, { timeout: 30000 });
+    const names = await page.evaluate(() => __smash.labels());
+    const scad = await page.$$eval('#labels .lb.scad', e => e.filter(x => x.style.display !== 'none').map(x => x.textContent));
+    assert.ok(scad.length >= 3, `SCAD tags: ${scad}`);
+    assert.ok(names.some(n => / Square$|Park$/.test(n)), `no square/park in ${names}`);
+    const hud = await page.$eval('#top', e => e.getBoundingClientRect().bottom);
+    const tops = await page.$$eval('#labels .lb', e => e.filter(x => x.style.display !== 'none').map(x => x.getBoundingClientRect().top));
+    assert.ok(tops.every(t => t >= hud - 1), 'a label sits under the top HUD');
+  });
   for (const id of WEAPONS) await step(`weapon ${id}`, async () => {
     await page.click(`.wp[data-w="${id}"]`);
     assert.ok(await page.$eval(`.wp[data-w="${id}"]`, b => b.classList.contains('on')));

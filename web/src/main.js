@@ -441,6 +441,39 @@ $('#rst').onclick=()=>{for(let k=0;k<nB;k++){bAlive[k]=1;bHp[k]=bMax[k];wallC[k]
   resetTrees();collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
 $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
 
+// ---------- map labels: real names from OSM (SCAD buildings, squares and parks, the river) ----------
+// Screen-space HTML tags, placed every other frame. Nearer and more important labels win; overlapping ones hide.
+const LBL={items:[],pool:[],max:innerWidth<=600?14:28,tick:0,v:new THREE.Vector3()};
+function buildLabels(D){
+  for(const k of scadIdx)if(bName[k])LBL.items.push({kind:'scad',k,x:bX[k],z:bZ[k],text:bName[k],range:1100,pri:0});
+  for(const [x,z,name,area] of D.pn||[])LBL.items.push({kind:'park',k:-1,x,z,y:2,text:name,range:area>20000?2200:800,pri:area>20000?1:2});
+  // the river label sits on the river outline point nearest downtown
+  if(D.river&&D.river.length){const c=centerOf(ZONES[0][1])||{x:0,z:0};let best=0,bd=1e18;
+    for(let i=0;i<D.river.length;i+=2){const d=(D.river[i]-c.x)**2+(D.river[i+1]-c.z)**2;if(d<bd){bd=d;best=i}}
+    LBL.items.push({kind:'water',k:-1,x:D.river[best]+20,z:D.river[best+1]-60,y:1,text:'Savannah River',range:3000,pri:1})}
+}
+function placeLabels(){
+  if(!LBL.items.length||(++LBL.tick&1))return;
+  const W=innerWidth,H=innerHeight,cam=camera.position,cand=[];
+  for(const it of LBL.items){const d=Math.hypot(it.x-cam.x,it.z-cam.z);if(d>it.range)continue;
+    LBL.v.set(it.x,it.kind==='scad'?(bAlive[it.k]?bH[it.k]+3:3):it.y,it.z).project(camera);
+    if(LBL.v.z>1||LBL.v.x<-1.1||LBL.v.x>1.1||LBL.v.y<-1.1||LBL.v.y>1.1)continue;
+    cand.push({it,sx:(LBL.v.x*.5+.5)*W,sy:(-LBL.v.y*.5+.5)*H,score:it.pri*600+d})}
+  cand.sort((a,b)=>a.score-b.score);
+  // keep tags off the HUD: score bar + zone chips at the top, weapon dock, open building list
+  const used=[];let n=0;LBL.max=W<=600||H<=500?14:28;
+  for(const s of ['#top','#zones','#dock','#list.open','#toast.on']){const e=document.querySelector(s);if(!e)continue;const r=e.getBoundingClientRect();if(r.width)used.push([r.left-4,r.top-4,r.right+4,r.bottom+4])}
+  for(const c of cand){if(n>=LBL.max)break;
+    const w=c.it.text.length*7+16,h=22,x0=c.sx-w/2,y0=c.sy-h-6;
+    if(used.some(r=>x0<r[2]&&x0+w>r[0]&&y0<r[3]&&y0+h>r[1]))continue;used.push([x0,y0,x0+w,y0+h]);
+    let el=LBL.pool[n];if(!el){el=document.createElement('div');$('#labels').appendChild(el);LBL.pool[n]=el}
+    const dead=c.it.kind==='scad'&&!bAlive[c.it.k],cls='lb '+c.it.kind+(dead?' dead':'');
+    if(el.className!==cls)el.className=cls;if(el.textContent!==c.it.text)el.textContent=c.it.text;
+    el.style.display='';el.style.transform=`translate(${c.sx.toFixed(1)}px,${(c.sy-(c.it.kind==='scad'?6:0)).toFixed(1)}px) translate(-50%,-100%)`;n++}
+  for(let i=n;i<LBL.pool.length;i++)LBL.pool[i].style.display='none';
+  LBL.shown=n;
+}
+
 // ---------- toast ----------
 let toastT=0;
 function toast(msg,action,ms=3500){const t=$('#toast');t.textContent=msg;
@@ -499,6 +532,7 @@ function loop(now){requestAnimationFrame(loop);const f0=performance.now();const 
   for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.t+=dt;const u=Math.min(1,f.t/f.dur);f.f(u);if(u>=1){f.end();FX.splice(i,1)}}
   if(geo){stepProjectiles(dt);stepQuake(dt);stepParticles(dt);flushAttrs()}
   const t=now/1000;for(const b of document.querySelectorAll('.wp')){const w=WEAPONS.find(x=>x.id==b.dataset.w);const rem=(cool[w.id]||0)-t;b.classList.toggle('wait',rem>0);b.querySelector('.cd').style.width=rem>0&&w.cd?rem/w.cd*100+'%':'0'}
+  if(ready)placeLabels();
   if(hudDirty){hudDirty=false;hud()}
   if(combo>1&&t-lastKill>2.2){combo=1;$('#combo').style.opacity=0}
   const f1=performance.now();renderer.render(scene,camera);
@@ -507,8 +541,9 @@ requestAnimationFrame(loop);
 
 PT.fetchStart=performance.now();
 fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(D=>{
-  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();hud();
-  const c=centerOf(ZONES[0][1]);if(c){controls.target.set(c.x,0,c.z);camera.position.set(c.x+250,320,c.z+400)}
+  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();buildLabels(D);hud();
+  // opening view: downtown SCAD buildings. A tall, narrow phone screen sees less across, so pull back a little.
+  const c=centerOf(ZONES[0][1]);if(c){const f=innerWidth<innerHeight?1.45:1;controls.target.set(c.x,0,c.z);camera.position.set(c.x+250*f,320*f,c.z+400*f)}
   ready=true;const g=$('#go');g.disabled=false;g.textContent='Start smashing';
   $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · heights: '+st.tagged+' mapped, '+st.lidar.toLocaleString()+' from lidar'+(D.t?' · '+D.t.length+' trees':'');
   if(PERF)window.__smash={PT,FR,rec(on){frRec=on;if(on)FR.length=0},
@@ -527,6 +562,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
       geo.setDrawRange(0,Infinity);scene.remove(city);for(const t of tiles)t.m.visible=true;renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
     hitK(k,amt,paint){return hit(k,amt,paint)},
     layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
+    labels(){return LBL.pool.slice(0,LBL.shown||0).map(e=>e.textContent)},
     me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
     loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
     // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer

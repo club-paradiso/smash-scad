@@ -8,7 +8,7 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - `web/index.html`: HUD 마크업과 CSS. `<script type="module" src="./src/main.js">`
 - `web/src/main.js`: 게임 전체(three.js 씬, 무기, 점수, 파티클, 사운드). ES 모듈. OrbitControls는 `three/addons/controls/OrbitControls.js`
 - `web/geom.js`: 순수 지오메트리 ES 모듈 `building(THREE, rec)`(default export `SG`도 있음). 게임과 node 테스트 공용
-- `web/public/scad-savannah.json`(v3): `{v:3, b:[건물], r:[도로 [w,flat]], p:[공원], w:[물], river, t:[나무 [x,z,침엽1,높이,수관반경]], tr:[가로수 줄], f:[보도], rl:[철도], pl:[부두 선], a:[[종류,면]]}`. a 종류: 0 주차장, 1 경기장, 2 수영장, 3 놀이터, 4 묘지, 5 부두 데크, 6 화단. 나무 높이 0 = 라이다 측정 없음. `tools/build_buildings.py`가 여기에 쓴다
+- `web/public/scad-savannah.json`(v3): `{v:3, b:[건물], r:[도로 [w,flat]], p:[공원], w:[물], river, t:[나무 [x,z,침엽1,높이,수관반경]], tr:[가로수 줄], f:[보도], rl:[철도], pl:[부두 선], a:[[종류,면]], pn:[[x,z,이름,면적]]}`. a 종류: 0 주차장, 1 경기장, 2 수영장, 3 놀이터, 4 묘지, 5 부두 데크, 6 화단. 나무 높이 0 = 라이다 측정 없음. `tools/build_buildings.py`가 여기에 쓴다
 - 라이다: `tools/lidar_fetch.py`(USGS 3DEP `GA_Statewide_B5_2018`, S3 EPT) → `tools/lidar_heights.py` → `data/lidar_heights.json`(커밋됨). 파이썬 의존성은 `tools/requirements.txt`. 방법과 검증은 README "라이다 높이"
 - `tools/`: OSM 타일 다운로드 → 파싱 → 지면 레이어 → 건물 빌드
 - `tools/perf/`: `measure.mjs`(성능 측정), `shots.mjs`(비교 캡처), `upload_ranges.mjs`, `lod_stats.mjs`. 결과와 방법은 `docs/perf.md`, 원자료는 `docs/perf-data/`
@@ -33,6 +33,7 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - 지면 레이어(물, 공원, 도로, 면, 보도, 철도, 부두, 가로수 줄)는 정점 색 지오메트리 하나를 건물과 같은 400m 타일로 나눠 컬링한다. 레이어 순서는 y 오프셋(0.04~0.3)
 - 나무는 InstancedMesh 3개(활엽 수관, 침엽 원뿔, 줄기). 폭발(페인트 제외)에 쓰러지고 복구 버튼으로 선다
 - 파티클은 InstancedMesh 2개(debris 700, puffs 360)
+- 지도 이름표: SCAD 건물 이름(노란 태그, 부서지면 취소선), 이름 있는 광장·공원 44개(`pn`, OSM `leisure=park/garden`의 name), Savannah River. HTML 태그를 2프레임마다 배치하고, 겹치거나 HUD(상단 바, 구역 칩, 무기 도크, 열린 목록) 위에 오는 것은 숨긴다(`placeLabels`). 최대 28개, 휴대폰 14개
 
 ## 모바일
 - 해상도 자동 조절: 픽셀 비율 min(기기,2)에서 시작, 프레임 평균 24ms 초과면 0.25씩 내리고(최저 1) 13ms 미만이 이어지면 올린다(`adaptResolution`). 픽셀 비율 2 이상이면 MSAA 끔
