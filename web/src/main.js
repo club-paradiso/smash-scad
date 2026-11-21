@@ -97,27 +97,39 @@ function poly(flat,y,color,list){
   let tri;try{tri=THREE.ShapeUtils.triangulateShape(pts,[])}catch(e){return}
   for(const t of tri)for(const j of t)list.push(pts[j].x,y,pts[j].y);
 }
-function flatMesh(list,color,y){
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(list,3));
-  const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,fog:true}));scene.add(m);return m;
+// All ground layers go into one vertex-coloured geometry, laid out by TILE cell like the buildings, and drawn as
+// one mesh per cell sharing the buffers, so cells off screen are culled. Layer order comes from small y offsets.
+const GROUND={pos:[],col:[]};
+function groundAdd(list,hex){const c=new THREE.Color(hex);for(let i=0;i<list.length;i+=3)GROUND.col.push(c.r,c.g,c.b);for(const v of list)GROUND.pos.push(v)}
+function groundFinish(){
+  const P=GROUND.pos,C=GROUND.col,nt=P.length/9,key=new Float64Array(nt);
+  for(let t=0;t<nt;t++){const o=t*9,cx=(P[o]+P[o+3]+P[o+6])/3,cz=(P[o+2]+P[o+5]+P[o+8])/3;key[t]=Math.floor((cz+TILE_OFF)/TILE)*1000+Math.floor((cx+TILE_OFF)/TILE)}
+  const order=[...Array(nt).keys()].sort((a,b)=>key[a]-key[b]||a-b);
+  const pos=new Float32Array(nt*9),col=new Float32Array(nt*9);
+  order.forEach((t,i)=>{pos.set(P.slice(t*9,t*9+9),i*9);col.set(C.slice(t*9,t*9+9),i*9)});
+  const pa=new THREE.BufferAttribute(pos,3),ca=new THREE.BufferAttribute(col,3);
+  const mat=new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,fog:true}),v=new THREE.Vector3();
+  for(let i=0;i<nt;){let j=i;while(j<nt&&key[order[j]]===key[order[i]])j++;
+    const g=new THREE.BufferGeometry();g.setAttribute('position',pa);g.setAttribute('color',ca);g.setDrawRange(i*3,(j-i)*3);
+    const box=new THREE.Box3();for(let q=i*3;q<j*3;q++)box.expandByPoint(v.fromBufferAttribute(pa,q));g.boundingSphere=box.getBoundingSphere(new THREE.Sphere());
+    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;m.name='ground';scene.add(m);i=j}
+  GROUND.pos=GROUND.col=null;
 }
 function buildGroundLayers(D){
-  const water=[];poly(D.river,.04,0,water);for(const w of D.w)poly(w,.05,0,water);
-  const wm=flatMesh(water,0x5f93ad);wm.material.color.setHex(0x5a8aa3);
-  const park=[];for(const p of D.p)poly(p,.09,0,park);
-  const pm=flatMesh(park,0);pm.material.color.setHex(0x8fae63);
-  const rd=[];for(const [w,f] of D.r)strip(f,w==2?8:w?5.5:3.4,.07,rd);
-  const rm=flatMesh(rd,0);rm.material.color.setHex(0x8a857c);
-  if(D.v<3)return;
-  // v3 surroundings, all from OSM tags (tools/build_ground.py): areas by kind, footpaths, rail, piers, tree rows
-  const AREA=[[0x77736d,.075],[0x79a85a,.1],[0x4fb0d6,.105],[0xc8a57c,.1],[0x9db383,.095],[0x8b6b4a,.3],[0xb98aa6,.1]];
-  const byKind=AREA.map(()=>[]);for(const [k,f] of D.a)poly(f,AREA[k][1],0,byKind[k]);
-  byKind.forEach((l,k)=>{if(l.length)flatMesh(l,AREA[k][0])});
-  const fp=[];for(const f of D.f)strip(f,1,.11,fp);if(fp.length)flatMesh(fp,0xd9d1c1);
-  const rl=[];for(const f of D.rl)strip(f,1,.12,rl);if(rl.length)flatMesh(rl,0x5b544d);
-  const pl=[];for(const f of D.pl)strip(f,1.6,.3,pl);if(pl.length)flatMesh(pl,0x8b6b4a);
-  const tr=[];for(const f of D.tr)strip(f,2.5,.13,tr);if(tr.length)flatMesh(tr,0x5f8a3e); // a mapped tree row, not individual trees
-  buildTrees(D.t);
+  const water=[];poly(D.river,.04,0,water);for(const w of D.w)poly(w,.05,0,water);groundAdd(water,0x5a8aa3);
+  const park=[];for(const p of D.p)poly(p,.09,0,park);groundAdd(park,0x8fae63);
+  const rd=[];for(const [w,f] of D.r)strip(f,w==2?8:w?5.5:3.4,.07,rd);groundAdd(rd,0x8a857c);
+  if(D.v>=3){
+    // v3 surroundings, all from OSM tags (tools/build_ground.py): areas by kind, footpaths, rail, piers, tree rows
+    const AREA=[[0x77736d,.075],[0x79a85a,.1],[0x4fb0d6,.105],[0xc8a57c,.1],[0x9db383,.095],[0x8b6b4a,.3],[0xb98aa6,.1]];
+    for(const [k,f] of D.a){const l=[];poly(f,AREA[k][1],0,l);groundAdd(l,AREA[k][0])}
+    const fp=[];for(const f of D.f)strip(f,1,.11,fp);groundAdd(fp,0xd9d1c1);
+    const rl=[];for(const f of D.rl)strip(f,1,.12,rl);groundAdd(rl,0x5b544d);
+    const pl=[];for(const f of D.pl)strip(f,1.6,.3,pl);groundAdd(pl,0x8b6b4a);
+    const tr=[];for(const f of D.tr)strip(f,2.5,.13,tr);groundAdd(tr,0x5f8a3e); // a mapped tree row, not individual trees
+  }
+  groundFinish();
+  if(D.v>=3)buildTrees(D.t);
 }
 // flat ribbon of half-width `half` along a polyline, pushed into `out` as triangles at height y
 function strip(f,half,y,out){
@@ -129,11 +141,12 @@ let trees=null;
 const TREE_DEFAULT_H=7,TREE_DEFAULT_R=2.5; // drawn size when lidar found no canopy (est); not a measurement
 function buildTrees(T){
   if(!T||!T.length)return;
-  const n=T.length,crown=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),new THREE.MeshLambertMaterial(),n),
-    cone=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,7),new THREE.MeshLambertMaterial(),n),
-    trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.18,.26,1,6),new THREE.MeshLambertMaterial({color:0x6b4f3a}),n);
+  const n=T.length,crown=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),new THREE.MeshLambertMaterial(),n),
+    cone=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,6,1,true),new THREE.MeshLambertMaterial(),n),
+    trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.18,.26,1,5,1,true),new THREE.MeshLambertMaterial({color:0x6b4f3a}),n);
+  // low-poly on purpose (20-face crown, open 5-sided trunk): 420 trees cost ~13k triangles instead of ~44k
   trees={T,n,crown,cone,trunk,down:new Uint8Array(n),x:new Float32Array(n),z:new Float32Array(n)};
-  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(m)}
+  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.name='trees';scene.add(m)}
   let nc=0,nn=0;
   for(let i=0;i<n;i++){const [x,z,needle,h0,r0]=T[i];trees.x[i]=x;trees.z[i]=z;
     const h=h0||TREE_DEFAULT_H,r=Math.min(r0||TREE_DEFAULT_R,h*.6),tk=Math.max(1,h-r*(needle?1.6:1.4));
@@ -513,6 +526,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
         const t0=performance.now();flushAttrs();renderer.render(scene,camera);gl.readPixels(0,0,1,1,6408,5121,px);if(f>1)t.push(performance.now()-t0)}
       geo.setDrawRange(0,Infinity);scene.remove(city);for(const t of tiles)t.m.visible=true;renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
     hitK(k,amt,paint){return hit(k,amt,paint)},
+    layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
     me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
     loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
     // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer
