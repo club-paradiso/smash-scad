@@ -6,7 +6,8 @@ shape: 0 flat, 1 gabled, 2 hipped, 3 pyramidal, 4 skillion, 5 dome
 obb axes: u along ang (ridge direction for gabled/hipped), v across. skillion: slope down toward +v.
 est: 0 = height from OSM height/levels tag, 1 = no tag and no lidar measurement (height estimated by building type),
      2 = no tag, height measured from USGS 3DEP lidar (data/lidar_heights.json, see tools/lidar_heights.py),
-     3 = SCAD building whose whole shape (roof surface + wall heights) is measured from lidar: the record then has
+     3 = whole shape (roof surface + wall heights) measured from lidar (all SCAD buildings the lidar confirms, and other
+         buildings whose roof is not flat): the record then has
          a 13th field {v, t, r} (data/lidar_roofs.json, tools/lidar_roofs.py) and web/geom.js draws that instead.
 """
 import json, math, os, re, zlib
@@ -218,8 +219,8 @@ for f in foot:
     out.append([1 if f['scad'] else 0, nm, r1(f['o']), [r1(h) for h in f['h']], round(minH, 1), round(wallTop, 1),
                 round(roofH, 1), shape, [round(ob[0], 1), round(ob[1], 1), round(ob[2], 4), round(ob[3], 2), round(ob[4], 2)],
                 col(t.get('building:colour')), col(t.get('roof:colour')), est])
-    lr = ROOFS.get(f['key']) if f['scad'] else None
-    if lr and minH == 0:
+    lr = ROOFS.get(f['key'])
+    if lr and minH == 0 and not f['part']:
         hs = lr['v'][2::3]
         out[-1][5] = round(max(hs), 1); out[-1][6] = 0; out[-1][7] = 0; out[-1][11] = 3
         out[-1].append({'v': lr['v'], 't': lr['t'], 'r': lr['r']})
@@ -238,5 +239,5 @@ json.dump(D, open('web/public/scad-savannah.json', 'w'), separators=(',', ':'))
 print('buildings', len(out), 'scad', sum(o[0] for o in out), stats)
 import collections
 print(collections.Counter(o[7] for o in out), 'scad shapes', collections.Counter(o[7] for o in out if o[0]),
-      'scad est', sum(o[11] == 1 for o in out if o[0]), 'scad lidar', sum(o[11] == 2 for o in out if o[0]), 'scad lidar 3D', sum(o[11] == 3 for o in out),
+      'scad est', sum(o[11] == 1 for o in out if o[0]), 'scad lidar', sum(o[11] == 2 for o in out if o[0]), 'scad lidar 3D', sum(o[11] == 3 for o in out if o[0]), 'all lidar 3D', sum(o[11] == 3 for o in out),
       'all est', sum(o[11] == 1 for o in out), 'all lidar', sum(o[11] == 2 for o in out))

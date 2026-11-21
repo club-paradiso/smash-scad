@@ -1,4 +1,4 @@
-"""Measured 3D shape of SCAD buildings from USGS 3DEP lidar (GA_Statewide_B5_2018, public domain).
+"""Measured 3D shape of the buildings on the map from USGS 3DEP lidar (GA_Statewide_B5_2018, public domain).
 
 Input : data/lidar/*.laz, data/footprints.json   Output: data/lidar_roofs.json  {meta, b: {osm key: shape}}
 shape : v [x, z, h, ...] (h metres above the ground beside the building), t [i, j, k, ...] roof triangles,
@@ -9,9 +9,13 @@ Method
    each cell takes the 75th percentile elevation, empty cells take the nearest filled cell, and a 3x3 median
    applied twice removes small spikes (antennas, rooftop units, stray returns). Height = that minus the median ground under the
    footprint (2 m ground grid from lidar_common).
-2. Simplification: the footprint outline (densified to 2.5 m) is the fixed boundary of a constrained Delaunay
-   triangulation; interior grid points are added greedily where the surface is off by more than TOL metres,
-   until every grid point is within TOL. Flat roofs end up as a few triangles, towers and slopes stay detailed.
+2. Simplification: the footprint outline (densified to `edge` m) is the fixed boundary of a constrained Delaunay
+   triangulation; interior grid points are added greedily where the surface is off by more than `tol` metres,
+   until every grid point is within it (SCAD: tol 0.75 m, edge 2.5 m; other buildings: 1.5 m, OSM vertices only, at most 12
+   added points; the outline is not densified).
+   Non-SCAD buildings whose roof is flat within 1 m (95% of grid points) keep the box with the lidar height
+   (tools/lidar_heights.py): same look, far fewer triangles. Non-SCAD buildings whose 12-point fit still misses the
+   surface by more than 2 m also keep the box (a wide roof pulled up to one tall point would be a false shape). Flat roofs end up as a few triangles, towers and slopes stay detailed.
 3. Walls (built in web/geom.js) follow the OSM outline up to the roof height measured 1 m inside the outline.
 A footprint is skipped when building points are under 50% of its first returns or fewer than 30: the lidar
 then shows something else there (trees, a building newer than the 2018 flight). The box model stays then.
@@ -23,9 +27,13 @@ import triangle
 from scipy import ndimage
 from lidar_common import *   # x, z, e, c, rn, ground_at, points_in_box, pip
 
-G, TOL, MAXPTS = 1.0, 0.75, 1500
+G = 1.0
+# SCAD buildings (the targets, seen up close) get a finer fit than the rest of the city
+PARAMS = {True: dict(tol=0.75, edge=2.5, maxpts=1500), False: dict(tol=1.5, edge=1e9, maxpts=12)}
+FLAT_OK = 1.0   # non-SCAD: if a flat roof at the median height is within this everywhere, keep the box
+FIT_MAX = 2.0   # non-SCAD: if 12 points can't fit the roof within this, keep the box (avoids false tent shapes)
 
-def densify(ring, step=2.5):
+def densify(ring, step):
     out = []
     for i in range(len(ring)):
         a, b = np.asarray(ring[i]), np.asarray(ring[(i + 1) % len(ring)])
@@ -74,8 +82,8 @@ def surface(f):
             far &= np.hypot(gx - (ax + t * dx), gz - (az + t * dz)) >= 0.4
     return dict(height=height, cand=np.c_[gx[far], gz[far]], n=len(bld), g=g)
 
-def build(f, S):
-    rings = [densify(f['o'])] + [densify(h) for h in f['h']]
+def build(f, S, tol, edge, maxpts):
+    rings = [densify(f['o'], edge)] + [densify(h, edge) for h in f['h']]
     bverts = np.vstack(rings); segs = []; off = 0; ring_idx = []
     for r in rings:
         k = len(r); segs += [[off + i, off + (i + 1) % k] for i in range(k)]; ring_idx.append(list(range(off, off + k))); off += k
@@ -117,24 +125,31 @@ def build(f, S):
             hz = l1 * th[tri[0]] + l2 * th[tri[1]] + l3 * th[tri[2]]
             err[sel[ins]] = np.abs(hz[ins] - ch[sel[ins]])
         err[used] = 0
-        bad = np.flatnonzero(err > TOL)
-        if not len(bad) or used.sum() >= MAXPTS: break
-        used[bad[np.argsort(-err[bad])[:max(8, len(bad) // 6)]]] = True
+        bad = np.flatnonzero(err > tol)
+        if not len(bad) or used.sum() >= maxpts: break
+        used[bad[np.argsort(-err[bad])[:max(1, min(max(8, len(bad) // 6), maxpts - int(used.sum())))]]] = True
     # boundary vertices keep their order 0..len(bverts)-1 in triangle's output (it appends new points after)
     assert np.allclose(tv[:len(bverts)], bverts)
     return dict(v=[round(float(q), 1) for p, hh in zip(tv, th) for q in (p[0], p[1], max(0.5, hh))],
                 t=[int(i) for tri in tt for i in tri], r=ring_idx, n=S['n'], err=round(float(err.max()), 2))
 
 fp = json.load(open('data/footprints.json'))
-out, skipped = {}, []
+out, skipped, flat, poor = {}, [], [], []
 for f in fp:
-    if not (f['ok'] and f['scad']): continue
+    if not f['ok'] or f['part']: continue   # building:part pieces keep their OSM model
     S = surface(f)
     if S is None: skipped.append(f['k']); continue
-    out[f['k']] = build(f, S)
+    if not f['scad']:
+        hh = S['height'](S['cand'][:, 0], S['cand'][:, 1]) if len(S['cand']) else np.zeros(0)
+        if not len(hh) or np.percentile(np.abs(hh - np.median(hh)), 95) < FLAT_OK: flat.append(f['k']); continue
+    shape = build(f, S, **PARAMS[bool(f['scad'])])
+    if not f['scad'] and shape['err'] > FIT_MAX: poor.append(f['k']); continue
+    out[f['k']] = shape
 tri = sum(len(b['t']) // 3 for b in out.values())
-print('SCAD footprints', sum(1 for f in fp if f['ok'] and f['scad']), 'modelled', len(out), 'skipped', len(skipped),
-      'roof triangles', tri, 'max error', max(b['err'] for b in out.values()))
+scad = {f['k'] for f in fp if f['ok'] and f['scad']}
+print('footprints', sum(1 for f in fp if f['ok'] and not f['part']), 'modelled', len(out), 'skipped', len(skipped), 'flat kept as box', len(flat), 'poor fit kept as box', len(poor),
+      '| SCAD modelled', len(scad & set(out)), 'of', len(scad), '| roof triangles', tri,
+      'SCAD', sum(len(out[k]['t']) // 3 for k in scad & set(out)))
 json.dump({'meta': {'source': 'USGS 3DEP lidar, GA_Statewide_B5_2018 (s3://usgs-lidar-public, EPT), public domain',
-                    'flight_year': 2018, 'grid_m': G, 'tolerance_m': TOL, 'method': 'see tools/lidar_roofs.py'},
+                    'flight_year': 2018, 'grid_m': G, 'params': {'scad': PARAMS[True], 'other': PARAMS[False]}, 'method': 'see tools/lidar_roofs.py'},
            'skipped': skipped, 'b': out}, open('data/lidar_roofs.json', 'w'), separators=(',', ':'))

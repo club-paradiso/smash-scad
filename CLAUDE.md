@@ -9,7 +9,7 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - `web/src/main.js`: 게임 전체(three.js 씬, 무기, 점수, 파티클, 사운드). ES 모듈. OrbitControls는 `three/addons/controls/OrbitControls.js`
 - `web/geom.js`: 순수 지오메트리 ES 모듈 `building(THREE, rec)`(default export `SG`도 있음). 게임과 node 테스트 공용
 - `web/public/scad-savannah.json`(v3): `{v:3, b:[건물], r:[도로 [w,flat]], p:[공원], w:[물], river, t:[나무 [x,z,침엽1,높이,수관반경]], tr:[가로수 줄], f:[보도], rl:[철도], pl:[부두 선], a:[[종류,면]], pn:[[x,z,이름,면적]]}`. a 종류: 0 주차장, 1 경기장, 2 수영장, 3 놀이터, 4 묘지, 5 부두 데크, 6 화단. 나무 높이 0 = 라이다 측정 없음. `tools/build_buildings.py`가 여기에 쓴다
-- 라이다: `tools/lidar_fetch.py`(USGS 3DEP `GA_Statewide_B5_2018`, S3 EPT) → `tools/lidar_heights.py` → `data/lidar_heights.json`, `tools/lidar_roofs.py` → `data/lidar_roofs.json`(SCAD 실측 형태, 둘 다 커밋됨). 공용 로더는 `tools/lidar_common.py`. 파이썬 의존성은 `tools/requirements.txt`. 방법과 검증은 README "라이다 높이"
+- 라이다: `tools/lidar_fetch.py`(USGS 3DEP `GA_Statewide_B5_2018`, S3 EPT) → `tools/lidar_heights.py` → `data/lidar_heights.json`, `tools/lidar_roofs.py` → `data/lidar_roofs.json`(실측 형태, 둘 다 커밋됨). 공용 로더는 `tools/lidar_common.py`. 파이썬 의존성은 `tools/requirements.txt`. 방법과 검증은 README "라이다 높이"
 - `tools/`: OSM 타일 다운로드 → 파싱 → 지면 레이어 → 건물 빌드
 - `tools/perf/`: `measure.mjs`(성능 측정), `shots.mjs`(비교 캡처), `upload_ranges.mjs`, `lod_stats.mjs`. 결과와 방법은 `docs/perf.md`, 원자료는 `docs/perf-data/`
 - `tests/*.test.js`: `npm test`(node: 지붕, 데이터 v3, BVH 피킹). `npm run e2e`(Playwright, `npm run preview`를 띄운 상태에서): `tests/e2e/smoke.mjs`(1280·390px)와 `tests/e2e/mobile.mjs`(iPhone 13 세로·가로, Pixel 7 에뮬레이션: 터치, 바텀시트, GPS 안·밖·거부, 컨텍스트 손실 복구, 해상도 자동 조절)
@@ -20,7 +20,7 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - 좌표: 미터 단위 로컬 좌표, 원점은 위도 32.0745, 경도 -81.0945. x는 동쪽, z는 남쪽(z = -북쪽)
 - shape: 0 flat, 1 gabled, 2 hipped, 3 pyramidal, 4 skillion, 5 dome
 - obb의 u축(ang)은 용마루 방향. skillion은 +v가 내리막
-- est: 0 OSM 높이·층수 태그, 1 태그도 라이다 측정도 없음(건물 유형별 추정값), 2 태그 없음 → 라이다 실측 높이(평지붕 레코드만), 3 SCAD 건물 형태 전체를 라이다로 실측(13번째 필드 `{v,t,r}`: 지붕 삼각망과 윤곽 링, `web/geom.js`의 `measured()`가 그림). 3은 OSM 지붕 태그보다 우선
+- est: 0 OSM 높이·층수 태그, 1 태그도 라이다 측정도 없음(건물 유형별 추정값), 2 태그 없음 → 라이다 실측 높이(평지붕 레코드만), 3 형태 전체를 라이다로 실측(13번째 필드 `{v,t,r}`: 지붕 삼각망과 윤곽 링, `web/geom.js`의 `measured()`가 그림). SCAD 67개(정밀: 오차 0.75m)와 지붕이 평평하지 않은 그 밖의 건물 1,102개(거칠게: 오차 1.5m, 점 12개 이하, 맞지 않으면 상자 유지). 3은 OSM 지붕 태그보다 우선
 
 ## 렌더링 핵심
 - 모든 건물을 non-indexed BufferGeometry 하나(`geo`)로 병합. 건물 k의 정점 범위는 `vStart[k]`, `vCount[k]`. 삼각형→건물 매핑은 `faceB`
@@ -30,6 +30,7 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - 탭 판정은 three-mesh-bvh(`MeshBVH`, `indirect:true`, `acceleratedRaycast`). 지오메트리가 non-indexed 그대로라 faceIndex→`faceB`가 유지된다. BVH는 무너지기 전 위치 기준(이전 레이캐스트와 같음)
 - r147 화면을 유지하려고 `ColorManagement.enabled=false`, `outputColorSpace=LinearSRGBColorSpace`, 조명 세기 ×π(r155에서 레거시 조명 제거). 이 셋을 바꾸면 색과 밝기가 달라진다
 - `logarithmicDepthBuffer` 사용(지면 레이어의 z-fighting 방지)
+- 해 그림자: 방향광 그림자 맵(데스크톱 2048, 휴대폰 1024)이 카메라 목표를 따라다닌다(`updateSun`). 지면 색은 그대로 두고 `ShadowMaterial` 평면(y=0.32)이 어둡게만 한다. 붕괴 셰이더를 넣은 `customDepthMaterial`로 무너지는 건물 그림자도 줄어든다. 휴대폰(터치·짧은 변 700px 미만)은 기본 끔, 픽셀 비율 1에서도 프레임 평균 34ms를 넘으면 자동으로 끔. `?shadows=0/1`로 강제
 - 지면 레이어(물, 공원, 도로, 면, 보도, 철도, 부두, 가로수 줄)는 정점 색 지오메트리 하나를 건물과 같은 400m 타일로 나눠 컬링한다. 레이어 순서는 y 오프셋(0.04~0.3)
 - SCAD 건물 색: 벽은 다른 건물과 같은 중립 석재·스투코 범위(실제 외벽 색 데이터 없음), 지붕만 노란색으로 표적 표시
 - 나무는 InstancedMesh 3개(활엽 수관, 침엽 원뿔, 줄기). 폭발(페인트 제외)에 쓰러지고 복구 버튼으로 선다

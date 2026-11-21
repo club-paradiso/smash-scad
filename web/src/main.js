@@ -58,6 +58,7 @@ function adaptResolution(ms){
   adapt.acc+=ms;adapt.n++;if(adapt.n<45)return;
   const avg=adapt.acc/adapt.n;adapt.acc=adapt.n=0;
   if(avg>24&&dpr>1){dpr=Math.max(1,+(dpr-.25).toFixed(2));adapt.good=0;applyDpr()}
+  else if(avg>34&&dpr<=1&&shadowsOn&&qs.get('shadows')!=='1'){setShadows(false);adapt.good=0} // still slow at the lowest resolution: drop shadows
   else if(avg<13&&dpr<DPR_MAX){if(++adapt.good>=4){dpr=Math.min(DPR_MAX,+(dpr+.25).toFixed(2));adapt.good=0;applyDpr()}}
   else adapt.good=0;
 }
@@ -68,7 +69,28 @@ scene.background=SKY;scene.fog=new THREE.Fog(SKY,900,3600);
 const camera=new THREE.PerspectiveCamera(50,1,1,9000);
 camera.position.set(260,330,420);
 scene.add(new THREE.HemisphereLight(0xfff6e5,0x7d7466,.62*Math.PI));
-const sun=new THREE.DirectionalLight(0xfff0d0,.6*Math.PI);sun.position.set(-400,700,300);scene.add(sun);
+const sun=new THREE.DirectionalLight(0xfff0d0,.6*Math.PI);sun.position.set(-400,700,300);scene.add(sun,sun.target);
+// ---------- sun shadows ----------
+// The shadow box follows the camera target and grows with zoom. Ground layers keep their flat colours; a
+// ShadowMaterial plane just above them adds only the darkening. Turned off for good if frames stay slow at the
+// lowest resolution (see adaptResolution), and can be forced with ?shadows=0/1. Off by default on phones.
+const SUN_DIR=new THREE.Vector3(-400,700,300).normalize();
+const qs=new URLSearchParams(location.search);
+// Phones start without shadows (the extra depth pass is not measured on real phones yet); ?shadows=1 turns them on.
+const PHONE=matchMedia('(pointer: coarse)').matches&&Math.min(screen.width,screen.height)<700;
+let shadowsOn=qs.get('shadows')==='1'||(qs.get('shadows')!=='0'&&!PHONE);
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
+sun.castShadow=shadowsOn;sun.shadow.mapSize.set(innerWidth<=600?1024:2048,innerWidth<=600?1024:2048);
+sun.shadow.bias=-.0015;sun.shadow.normalBias=1.2;sun.shadow.camera.near=10;sun.shadow.camera.far=4000;
+const shadowCatcher=new THREE.Mesh(new THREE.PlaneGeometry(20000,20000),new THREE.ShadowMaterial({opacity:.36,depthWrite:false}));
+shadowCatcher.rotation.x=-Math.PI/2;shadowCatcher.position.y=.32;shadowCatcher.receiveShadow=true;shadowCatcher.renderOrder=1;shadowCatcher.visible=shadowsOn;scene.add(shadowCatcher);
+function updateSun(){
+  if(!shadowsOn)return;
+  const t=controls.target,d=camera.position.distanceTo(t),h=Math.min(1400,Math.max(220,d*1.1)),c=sun.shadow.camera;
+  sun.target.position.copy(t);sun.position.copy(t).addScaledVector(SUN_DIR,2000);
+  if(c.right!==h){c.left=-h;c.right=h;c.top=h;c.bottom=-h;c.updateProjectionMatrix()}
+}
+function setShadows(on){shadowsOn=on;sun.castShadow=on;shadowCatcher.visible=on}
 const controls=new OrbitControls(camera,canvas);
 controls.enableDamping=true;controls.dampingFactor=.12;controls.screenSpacePanning=false;
 controls.maxPolarAngle=1.38;controls.minDistance=35;controls.maxDistance=2600;
@@ -146,7 +168,7 @@ function buildTrees(T){
     trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.18,.26,1,5,1,true),new THREE.MeshLambertMaterial({color:0x6b4f3a}),n);
   // low-poly on purpose (20-face crown, open 5-sided trunk): 420 trees cost ~13k triangles instead of ~44k
   trees={T,n,crown,cone,trunk,down:new Uint8Array(n),x:new Float32Array(n),z:new Float32Array(n)};
-  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.name='trees';scene.add(m)}
+  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.name='trees';m.castShadow=true;scene.add(m)}
   let nc=0,nn=0;
   for(let i=0;i<n;i++){const [x,z,needle,h0,r0]=T[i];trees.x[i]=x;trees.z[i]=z;
     const h=h0||TREE_DEFAULT_H,r=Math.min(r0||TREE_DEFAULT_R,h*.6),tk=Math.max(1,h-r*(needle?1.6:1.4));
@@ -168,7 +190,7 @@ function placeTree(i,fall){ // fall 0 = standing, 1 = knocked flat and charred
 }
 function blastTrees(x,z,r){if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
 function resetTrees(){if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
-const TILE=400,TILE_OFF=4000,tiles=[];
+const TILE=400,TILE_OFF=4000,tiles=[];let depthMat=null;
 const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
   const B=D.b;nB=B.length;
@@ -212,7 +234,10 @@ function buildCity(D){
   dirtyC.bind(col);dirtyL.bind(aL);
   for(let k=0;k<nB;k++)paintB(k);
   const mat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
-  mat.onBeforeCompile=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
+  const collapse=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
+  mat.onBeforeCompile=collapse;
+  // the shadow pass draws with a depth material; give it the same collapse so falling buildings' shadows shrink too
+  depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking,side:THREE.DoubleSide});depthMat.onBeforeCompile=collapse;
   city=new THREE.Mesh(geo,mat);buildTiles(order,mat);
   // Tap picking goes through a BVH instead of testing all 115k triangles. indirect:true keeps the geometry
   // non-indexed and in its original order, so faceIndex still maps to a building through faceB.
@@ -233,7 +258,7 @@ function buildTiles(order,mat){
     const sph=box.getBoundingSphere(new THREE.Sphere());sph.radius+=box.max.y*.25; // room for a collapsing building's lean
     const g=new THREE.BufferGeometry();for(const n of ['position','normal','color','aL'])g.setAttribute(n,geo.getAttribute(n));
     g.setDrawRange(start,end-start);g.boundingSphere=sph;
-    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;scene.add(m);
+    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;m.castShadow=m.receiveShadow=true;m.customDepthMaterial=depthMat;scene.add(m);
     tiles.push({m,g,sph});
     i=j}
 }
@@ -537,6 +562,7 @@ function loop(now){requestAnimationFrame(loop);const f0=performance.now();const 
   if(ready)placeLabels();
   if(hudDirty){hudDirty=false;hud()}
   if(combo>1&&t-lastKill>2.2){combo=1;$('#combo').style.opacity=0}
+  updateSun();
   const f1=performance.now();renderer.render(scene,camera);
   if(PERF){const f2=performance.now();if(frRec)FR.push([now,f1-f0,f2-f1]);if(geo&&!PT.firstRender){renderer.getContext().readPixels(0,0,1,1,6408,5121,new Uint8Array(4));PT.firstRender=performance.now();PT.firstRenderCall=f2-f1}}}
 requestAnimationFrame(loop);
@@ -565,6 +591,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
     hitK(k,amt,paint){return hit(k,amt,paint)},
     layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
     labels(){return LBL.pool.slice(0,LBL.shown||0).map(e=>e.textContent)},
+    shadows(on){if(on!==undefined)setShadows(on);return shadowsOn},
     me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
     loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
     // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer

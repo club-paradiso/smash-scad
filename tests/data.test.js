@@ -18,9 +18,9 @@ test('height source flags are 0 tagged, 1 estimated, 2 lidar height, 3 lidar sha
     if (b[11] === 2) { assert.strictEqual(b[7], 0, `${b[1]} lidar height on a non-flat roof`); assert.ok(b[5] - b[4] >= 2 && b[5] < 120, `${b[1]} ${b[5]}`) }
   }
   // counts at the time of the 2026-11-21 rebuild; change them with the data, with a reason
-  assert.strictEqual(D.b.filter(b => b[11] === 2).length, 3374);
-  assert.strictEqual(D.b.filter(b => b[11] === 3).length, 67);   // only SCAD buildings get the measured shape
-  assert.ok(D.b.every(b => b[11] !== 3 || b[0] === 1));
+  assert.strictEqual(D.b.filter(b => b[11] === 2).length, 2410);   // box + lidar height (flat roofs, and roofs 12 points can't fit within 2 m)
+  assert.strictEqual(D.b.filter(b => b[11] === 3).length, 1169);   // measured shape: 67 SCAD + 1,102 other non-flat roofs
+  assert.strictEqual(D.b.filter(b => b[0] && b[11] === 3).length, 67);
   assert.strictEqual(D.b.filter(b => b[0] && b[11] === 1).length, 3);
 });
 
@@ -47,7 +47,7 @@ test('named squares and parks come from OSM names', () => {
   for (const [x, z, n, a] of D.pn) assert.ok(Number.isFinite(x) && Number.isFinite(z) && n && a > 0);
 });
 
-test('measured SCAD shapes: valid indices, outline rings match the footprint, roof covers it', () => {
+test('measured shapes: valid indices, outline rings match the footprint, roof covers it', () => {
   const area = f => { let a = 0; for (let i = 0; i < f.length; i += 2) { const j = (i + 2) % f.length; a += f[i] * f[j + 1] - f[j] * f[i + 1] } return Math.abs(a) / 2 };
   for (const b of D.b.filter(b => b[11] === 3)) {
     const { v, t, r } = b[12], n = v.length / 3;

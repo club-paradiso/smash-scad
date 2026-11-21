@@ -42,6 +42,7 @@ const startAndCheck = async (page, step) => {
 
 await run('iPhone13', { ...devices['iPhone 13'], permissions: ['geolocation'], geolocation: POETTER }, async (page, step) => {
   await startAndCheck(page, step);
+  await step('shadows start off on a phone', async () => assert.equal(await page.evaluate(() => __smash.shadows()), false));
   await step('adaptive resolution: slow frames lower the pixel ratio (only asserted when frames really are slow)', async () => {
     const d0 = await page.evaluate(() => __smash.dpr()); assert.equal(d0, 2, 'starts at min(devicePixelRatio 3, 2)');
     await page.evaluate(() => __smash.rec(true)); await page.waitForTimeout(9000);
