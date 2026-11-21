@@ -45,9 +45,23 @@ const canvas=$('#c');
 // light levels were tuned on r147 (no colour management, linear output, legacy lights), so keep that look:
 // colours stay raw, output stays linear, and light intensities get the factor of PI that r147 applied internally.
 THREE.ColorManagement.enabled=false;
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,logarithmicDepthBuffer:true});
+// MSAA costs a lot of fill rate on phones; at 2x+ pixel density the jaggies are too small to see, so skip it there.
+const renderer=new THREE.WebGLRenderer({canvas,antialias:devicePixelRatio<2,logarithmicDepthBuffer:true,powerPreference:'high-performance'});
 renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+// Adaptive resolution: start at min(device ratio, 2); if frames run slow for ~1.5 s, step the pixel ratio down
+// (to 1 at the lowest), and step back up after a long run of fast frames. The HUD is HTML and stays sharp.
+const DPR_MAX=Math.min(devicePixelRatio||1,2);let dpr=DPR_MAX;
+renderer.setPixelRatio(dpr);
+const adapt={acc:0,n:0,good:0};
+function adaptResolution(ms){
+  if(document.hidden||ms>250)return; // ignore resume hitches
+  adapt.acc+=ms;adapt.n++;if(adapt.n<45)return;
+  const avg=adapt.acc/adapt.n;adapt.acc=adapt.n=0;
+  if(avg>24&&dpr>1){dpr=Math.max(1,+(dpr-.25).toFixed(2));adapt.good=0;applyDpr()}
+  else if(avg<13&&dpr<DPR_MAX){if(++adapt.good>=4){dpr=Math.min(DPR_MAX,+(dpr+.25).toFixed(2));adapt.good=0;applyDpr()}}
+  else adapt.good=0;
+}
+function applyDpr(){renderer.setPixelRatio(dpr);resize()}
 const scene=new THREE.Scene();
 const SKY=new THREE.Color(0xcfdbe2);
 scene.background=SKY;scene.fog=new THREE.Fog(SKY,900,3600);
@@ -61,6 +75,14 @@ controls.maxPolarAngle=1.38;controls.minDistance=35;controls.maxDistance=2600;
 controls.mouseButtons={LEFT:THREE.MOUSE.PAN,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.ROTATE};
 controls.touches={ONE:THREE.TOUCH.PAN,TWO:THREE.TOUCH.DOLLY_ROTATE};
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
+// Phones drop the WebGL context under memory pressure or after long backgrounding. three restores its own
+// state on 'webglcontextrestored' and re-uploads every buffer; if no restore comes, offer a reload.
+let ctxLost=false,ctxTimer=0;
+canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();ctxLost=true;
+  ctxTimer=setTimeout(()=>{if(ctxLost)toast('Graphics were reset by the browser.',{label:'Reload',fn:()=>location.reload()},0)},2500)});
+canvas.addEventListener('webglcontextrestored',()=>{ctxLost=false;clearTimeout(ctxTimer);for(const a of [aL,col])if(a){a.clearUpdateRanges();a.needsUpdate=true}hideToast()});
+// Background tab / locked phone: stop audio; rAF already stops, and the frame clock restarts cleanly.
+document.addEventListener('visibilitychange',()=>{if(!AC)return;if(document.hidden)AC.suspend();else if(!muted)AC.resume()});
 addEventListener('resize',resize);resize();
 
 // ground
@@ -75,21 +97,77 @@ function poly(flat,y,color,list){
   let tri;try{tri=THREE.ShapeUtils.triangulateShape(pts,[])}catch(e){return}
   for(const t of tri)for(const j of t)list.push(pts[j].x,y,pts[j].y);
 }
-function flatMesh(list,color,y){
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(list,3));
-  const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,fog:true}));scene.add(m);return m;
+// All ground layers go into one vertex-coloured geometry, laid out by TILE cell like the buildings, and drawn as
+// one mesh per cell sharing the buffers, so cells off screen are culled. Layer order comes from small y offsets.
+const GROUND={pos:[],col:[]};
+function groundAdd(list,hex){const c=new THREE.Color(hex);for(let i=0;i<list.length;i+=3)GROUND.col.push(c.r,c.g,c.b);for(const v of list)GROUND.pos.push(v)}
+function groundFinish(){
+  const P=GROUND.pos,C=GROUND.col,nt=P.length/9,key=new Float64Array(nt);
+  for(let t=0;t<nt;t++){const o=t*9,cx=(P[o]+P[o+3]+P[o+6])/3,cz=(P[o+2]+P[o+5]+P[o+8])/3;key[t]=Math.floor((cz+TILE_OFF)/TILE)*1000+Math.floor((cx+TILE_OFF)/TILE)}
+  const order=[...Array(nt).keys()].sort((a,b)=>key[a]-key[b]||a-b);
+  const pos=new Float32Array(nt*9),col=new Float32Array(nt*9);
+  order.forEach((t,i)=>{pos.set(P.slice(t*9,t*9+9),i*9);col.set(C.slice(t*9,t*9+9),i*9)});
+  const pa=new THREE.BufferAttribute(pos,3),ca=new THREE.BufferAttribute(col,3);
+  const mat=new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,fog:true}),v=new THREE.Vector3();
+  for(let i=0;i<nt;){let j=i;while(j<nt&&key[order[j]]===key[order[i]])j++;
+    const g=new THREE.BufferGeometry();g.setAttribute('position',pa);g.setAttribute('color',ca);g.setDrawRange(i*3,(j-i)*3);
+    const box=new THREE.Box3();for(let q=i*3;q<j*3;q++)box.expandByPoint(v.fromBufferAttribute(pa,q));g.boundingSphere=box.getBoundingSphere(new THREE.Sphere());
+    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;m.name='ground';scene.add(m);i=j}
+  GROUND.pos=GROUND.col=null;
 }
 function buildGroundLayers(D){
-  const water=[];poly(D.river,.04,0,water);for(const w of D.w)poly(w,.05,0,water);
-  const wm=flatMesh(water,0x5f93ad);wm.material.color.setHex(0x5a8aa3);
-  const park=[];for(const p of D.p)poly(p,.09,0,park);
-  const pm=flatMesh(park,0);pm.material.color.setHex(0x8fae63);
-  const rd=[];
-  for(const [w,f] of D.r){const half=w?5.5:3.4;
-    for(let i=0;i+3<f.length;i+=2){const x1=f[i],z1=f[i+1],x2=f[i+2],z2=f[i+3];let dx=x2-x1,dz=z2-z1;const L=Math.hypot(dx,dz)||1;const nx=-dz/L*half,nz=dx/L*half;
-      rd.push(x1+nx,.07,z1+nz,x1-nx,.07,z1-nz,x2+nx,.07,z2+nz, x2+nx,.07,z2+nz,x1-nx,.07,z1-nz,x2-nx,.07,z2-nz)}}
-  const rm=flatMesh(rd,0);rm.material.color.setHex(0x8a857c);
+  const water=[];poly(D.river,.04,0,water);for(const w of D.w)poly(w,.05,0,water);groundAdd(water,0x5a8aa3);
+  const park=[];for(const p of D.p)poly(p,.09,0,park);groundAdd(park,0x8fae63);
+  const rd=[];for(const [w,f] of D.r)strip(f,w==2?8:w?5.5:3.4,.07,rd);groundAdd(rd,0x8a857c);
+  if(D.v>=3){
+    // v3 surroundings, all from OSM tags (tools/build_ground.py): areas by kind, footpaths, rail, piers, tree rows
+    const AREA=[[0x77736d,.075],[0x79a85a,.1],[0x4fb0d6,.105],[0xc8a57c,.1],[0x9db383,.095],[0x8b6b4a,.3],[0xb98aa6,.1]];
+    for(const [k,f] of D.a){const l=[];poly(f,AREA[k][1],0,l);groundAdd(l,AREA[k][0])}
+    const fp=[];for(const f of D.f)strip(f,1,.11,fp);groundAdd(fp,0xd9d1c1);
+    const rl=[];for(const f of D.rl)strip(f,1,.12,rl);groundAdd(rl,0x5b544d);
+    const pl=[];for(const f of D.pl)strip(f,1.6,.3,pl);groundAdd(pl,0x8b6b4a);
+    const tr=[];for(const f of D.tr)strip(f,2.5,.13,tr);groundAdd(tr,0x5f8a3e); // a mapped tree row, not individual trees
+  }
+  groundFinish();
+  if(D.v>=3)buildTrees(D.t);
 }
+// flat ribbon of half-width `half` along a polyline, pushed into `out` as triangles at height y
+function strip(f,half,y,out){
+  for(let i=0;i+3<f.length;i+=2){const x1=f[i],z1=f[i+1],x2=f[i+2],z2=f[i+3];const dx=x2-x1,dz=z2-z1;const L=Math.hypot(dx,dz)||1;const nx=-dz/L*half,nz=dx/L*half;
+    out.push(x1+nx,y,z1+nz,x1-nx,y,z1-nz,x2+nx,y,z2+nz, x2+nx,y,z2+nz,x1-nx,y,z1-nz,x2-nx,y,z2-nz)}
+}
+// ---------- trees: OSM natural=tree nodes; height and crown radius measured from 2018 lidar where it found a canopy ----------
+let trees=null;
+const TREE_DEFAULT_H=7,TREE_DEFAULT_R=2.5; // drawn size when lidar found no canopy (est); not a measurement
+function buildTrees(T){
+  if(!T||!T.length)return;
+  const n=T.length,crown=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),new THREE.MeshLambertMaterial(),n),
+    cone=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,6,1,true),new THREE.MeshLambertMaterial(),n),
+    trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.18,.26,1,5,1,true),new THREE.MeshLambertMaterial({color:0x6b4f3a}),n);
+  // low-poly on purpose (20-face crown, open 5-sided trunk): 420 trees cost ~13k triangles instead of ~44k
+  trees={T,n,crown,cone,trunk,down:new Uint8Array(n),x:new Float32Array(n),z:new Float32Array(n)};
+  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.name='trees';scene.add(m)}
+  let nc=0,nn=0;
+  for(let i=0;i<n;i++){const [x,z,needle,h0,r0]=T[i];trees.x[i]=x;trees.z[i]=z;
+    const h=h0||TREE_DEFAULT_H,r=Math.min(r0||TREE_DEFAULT_R,h*.6),tk=Math.max(1,h-r*(needle?1.6:1.4));
+    const c=new THREE.Color(needle?0x3f6b3a:0x5d8a3c).offsetHSL(((i*37)%11-5)/200,0,((i*53)%9-4)/80);
+    T[i].m={x,z,h,r,tk,needle,c};
+    (needle?nn++:nc++)}
+  crown.count=nc;cone.count=nn;trunk.count=n;
+  for(const m of [crown,cone])m.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(m.count*3),3);
+  trees.slot=new Int32Array(n);let a=0,b=0;for(let i=0;i<n;i++)trees.slot[i]=T[i].m.needle?b++:a++;
+  for(let i=0;i<n;i++)placeTree(i,0);
+}
+function placeTree(i,fall){ // fall 0 = standing, 1 = knocked flat and charred
+  const {x,z,h,r,tk,needle,c}=trees.T[i].m,m=needle?trees.cone:trees.crown,s=trees.slot[i];
+  const ty=fall?.05:1;
+  dummy.rotation.set(0,0,0);dummy.position.set(x,tk*ty/2,z);dummy.scale.set(1,tk*ty,1);dummy.updateMatrix();trees.trunk.setMatrixAt(i,dummy.matrix);
+  if(needle){dummy.position.set(x,(tk+r*.8)*ty,z);dummy.scale.set(r,(h-tk)*ty+.01,r)}else{dummy.position.set(x,(tk+r*.7)*ty,z);dummy.scale.set(r,r*.85*ty+.01,r)}
+  dummy.updateMatrix();m.setMatrixAt(s,dummy.matrix);m.setColorAt(s,fall?tmpA.copy(c).lerp(CHAR,.8):c);
+  trees.trunk.instanceMatrix.needsUpdate=m.instanceMatrix.needsUpdate=m.instanceColor.needsUpdate=true;
+}
+function blastTrees(x,z,r){if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
+function resetTrees(){if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
 const TILE=400,TILE_OFF=4000,tiles=[];
 const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
@@ -138,7 +216,7 @@ function buildCity(D){
   // non-indexed and in its original order, so faceIndex still maps to a building through faceB.
   // The BVH is built from the uncollapsed positions, as the plain raycast was (aL only moves vertices in the shader).
   const t0=performance.now();geo.boundsTree=new MeshBVH(geo,{indirect:true});city.raycast=acceleratedRaycast;PT.extraInit=performance.now()-t0;
-  return B.reduce((a,r)=>{a.shaped+=r[7]?1:0;a.measured+=r[11]?0:1;return a},{shaped:0,measured:0});
+  return B.reduce((a,r)=>{a.shaped+=r[7]?1:0;a.tagged+=r[11]==0?1:0;a.lidar+=r[11]==2?1:0;return a},{shaped:0,tagged:0,lidar:0});
 }
 // One mesh per cell, all sharing the city's attribute buffers (uploaded once), each with its own draw range and
 // bounding sphere so three can frustum-cull cells; the camera usually sees about a third of the city.
@@ -244,6 +322,7 @@ function kill(k){
   hudDirty=true;
 }
 function blast(x,z,r,dmg,paint){let kills=0;
+  if(!paint)blastTrees(x,z,r*.8);
   for(let k=0;k<nB;k++){if(!bAlive[k])continue;const d=Math.hypot(bX[k]-x,bZ[k]-z)-bR[k]*.6;if(d<r){const f=1-Math.max(0,d)/r;
     kills+=hit(k,dmg*(.3+.7*f),paint?PAINTS[(Math.random()*PAINTS.length)|0]:0)}}
   return kills;
@@ -265,7 +344,10 @@ function popAt(x,y,z,text,big){v3.set(x,y,z).project(camera);if(v3.z>1)return;
 
 // ---------- camera shake ----------
 let shakeAmt=0,hudDirty=false;const shakeOff=new THREE.Vector3();
-function shake(a){shakeAmt=Math.min(14,shakeAmt+a)}
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function shake(a){if(REDUCED)return;shakeAmt=Math.min(14,shakeAmt+a);buzz(Math.min(120,a*12))}
+// short vibration on Android (iOS Safari has no Vibration API, so it is a no-op there)
+let lastBuzz=0;function buzz(ms){const t=performance.now();if(muted||t-lastBuzz<120||!navigator.vibrate)return;lastBuzz=t;try{navigator.vibrate(ms|0)}catch(e){}}
 
 // ---------- audio ----------
 let AC=null,noiseBuf=null;
@@ -356,12 +438,56 @@ $('#q').oninput=renderList;
 $('#bl').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const k=+b.dataset.k;flyTo(bX[k],bZ[k],220);if(innerWidth<700)$('#list').classList.remove('open')});
 $('#snd').onclick=()=>{muted=!muted;$('#wave').style.display=muted?'none':'';audio()};
 $('#rst').onclick=()=>{for(let k=0;k<nB;k++){bAlive[k]=1;bHp[k]=bMax[k];wallC[k].copy(baseW[k]);roofC[k].copy(baseR[k]);setL(k,1,0,0);paintB(k)}
-  collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
+  resetTrees();collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
 $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
+
+// ---------- toast ----------
+let toastT=0;
+function toast(msg,action,ms=3500){const t=$('#toast');t.textContent=msg;
+  if(action){const b=document.createElement('button');b.textContent=action.label;b.onclick=action.fn;t.appendChild(b)}
+  t.classList.add('on');clearTimeout(toastT);if(ms)toastT=setTimeout(hideToast,ms)}
+function hideToast(){$('#toast').classList.remove('on')}
+
+// ---------- my location (GPS) ----------
+// The position is used only on this device to draw a marker; it is never sent anywhere.
+// Local metres use the same origin and scale as tools/build_buildings.py.
+const GEO={lat0:32.0745,lon0:-81.0945,kx:Math.cos(32.0745*Math.PI/180)*111320,kz:110574,box:[32.044,32.086,-81.112,-81.082]};
+const geoToLocal=(lat,lon)=>({x:(lon-GEO.lon0)*GEO.kx,z:-(lat-GEO.lat0)*GEO.kz});
+const inMap=(lat,lon)=>lat>=GEO.box[0]&&lat<=GEO.box[1]&&lon>=GEO.box[2]&&lon<=GEO.box[3];
+let geoWatch=null,geoFirst=true;
+const me=new THREE.Group();me.visible=false;scene.add(me);
+{const dot=new THREE.Mesh(new THREE.CylinderGeometry(3.2,3.2,1.2,24),new THREE.MeshBasicMaterial({color:0x1e88ff}));dot.position.y=1;
+ const rim=new THREE.Mesh(new THREE.CylinderGeometry(4.2,4.2,1,24),new THREE.MeshBasicMaterial({color:0xffffff}));rim.position.y=.8;
+ const acc=new THREE.Mesh(new THREE.CircleGeometry(1,48),new THREE.MeshBasicMaterial({color:0x1e88ff,transparent:true,opacity:.18,depthWrite:false}));acc.rotation.x=-Math.PI/2;acc.position.y=.5;acc.name='acc';
+ const pin=new THREE.Mesh(new THREE.ConeGeometry(3,9,16),new THREE.MeshBasicMaterial({color:0x1e88ff}));pin.rotation.x=Math.PI;pin.position.y=26;pin.name='pin';
+ me.add(acc,rim,dot,pin)}
+function geoStop(){if(geoWatch!==null)navigator.geolocation.clearWatch(geoWatch);geoWatch=null;me.visible=false;$('#gps').classList.remove('on','wait');$('#gps').setAttribute('aria-pressed','false')}
+function geoStart(){
+  if(!('geolocation' in navigator)){toast('This browser has no location access.');return}
+  if(!window.isSecureContext){toast('Location needs a secure (https) page.');return}
+  geoFirst=true;$('#gps').classList.add('wait');$('#gps').setAttribute('aria-pressed','true');
+  geoWatch=navigator.geolocation.watchPosition(p=>{
+    const {latitude:lat,longitude:lon,accuracy}=p.coords;const b=$('#gps');b.classList.remove('wait');b.classList.add('on');
+    if(!inMap(lat,lon)){me.visible=false;if(geoFirst){const c=geoToLocal(lat,lon);const km=Math.hypot(c.x,c.z)/1000;
+      toast(`You are about ${km<10?km.toFixed(1):Math.round(km).toLocaleString()} km from the Savannah map, so there is nothing to show.`)}geoFirst=false;return}
+    const c=geoToLocal(lat,lon);me.position.set(c.x,0,c.z);me.visible=true;
+    const a=me.getObjectByName('acc');a.scale.setScalar(Math.max(5,Math.min(accuracy,300)));
+    if(geoFirst){flyTo(c.x,c.z,320);toast(accuracy>60?`You are here (±${Math.round(accuracy)} m)`:'You are here')}
+    geoFirst=false},
+  e=>{geoStop();toast(e.code===1?'Location permission was declined.':e.code===3?'Could not get a location fix in time.':'Location is unavailable right now.')},
+  {enableHighAccuracy:true,maximumAge:15000,timeout:15000})}
+$('#gps').onclick=()=>{audio();if(geoWatch!==null){geoStop();return}geoStart()};
+
+// ---------- bottom sheet: drag the list down to close (phones) ----------
+{let y0=null;const L=$('#list');
+ L.addEventListener('touchstart',e=>{const t=e.target;if(t.closest('#bl')&&$('#bl').scrollTop>0||t.closest('input'))return;y0=e.touches[0].clientY},{passive:true});
+ L.addEventListener('touchmove',e=>{if(y0===null||innerWidth>600)return;const d=e.touches[0].clientY-y0;if(d>0)L.style.transform=`translateY(${d}px)`},{passive:true});
+ L.addEventListener('touchend',e=>{if(y0===null)return;const d=(e.changedTouches[0]?.clientY??y0)-y0;y0=null;L.style.transform='';if(innerWidth<=600&&d>70)L.classList.remove('open')})}
 
 // ---------- loop ----------
 let last=performance.now();
-function loop(now){requestAnimationFrame(loop);const f0=performance.now();const dt=Math.min(.05,(now-last)/1000);last=now;
+function loop(now){requestAnimationFrame(loop);const f0=performance.now();const frameMs=now-last;const dt=Math.min(.05,frameMs/1000);last=now;
+  if(ctxLost)return;if(ready)adaptResolution(frameMs);
   camera.position.sub(shakeOff);
   if(fly){fly.t+=dt/1.1;const u=Math.min(1,fly.t),e=u<.5?2*u*u:1-(-2*u+2)**2/2;controls.target.lerpVectors(fly.from,fly.to,e);camera.position.copy(controls.target).add(fly.off);if(u>=1)fly=null}
   controls.target.x=Math.max(-1800,Math.min(1300,controls.target.x));controls.target.z=Math.max(-1500,Math.min(3400,controls.target.z));controls.target.y=0;
@@ -369,6 +495,7 @@ function loop(now){requestAnimationFrame(loop);const f0=performance.now();const 
   shakeAmt*=Math.pow(.02,dt);shakeOff.set((Math.random()-.5)*shakeAmt,(Math.random()-.5)*shakeAmt*.6,(Math.random()-.5)*shakeAmt);camera.position.add(shakeOff);
   for(let i=collapsing.length-1;i>=0;i--){const c=collapsing[i];c.t+=dt;const u=Math.min(1,c.t/c.dur),e=u*u;setL(c.k,c.s0+(.03-c.s0)*e,c.lx*Math.sin(u*Math.PI)*.6,c.lz*Math.sin(u*Math.PI)*.6);
     if(Math.random()<.4)spawnPuff(bX[c.k],1,bZ[c.k],0xbdb3a3,3+bR[c.k]*.25,1,5);if(u>=1)collapsing.splice(i,1)}
+  if(me.visible){const p=me.getObjectByName('pin');p.position.y=26+Math.sin(now/300)*3}
   for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.t+=dt;const u=Math.min(1,f.t/f.dur);f.f(u);if(u>=1){f.end();FX.splice(i,1)}}
   if(geo){stepProjectiles(dt);stepQuake(dt);stepParticles(dt);flushAttrs()}
   const t=now/1000;for(const b of document.querySelectorAll('.wp')){const w=WEAPONS.find(x=>x.id==b.dataset.w);const rem=(cool[w.id]||0)-t;b.classList.toggle('wait',rem>0);b.querySelector('.cd').style.width=rem>0&&w.cd?rem/w.cd*100+'%':'0'}
@@ -383,7 +510,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
   PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();hud();
   const c=centerOf(ZONES[0][1]);if(c){controls.target.set(c.x,0,c.z);camera.position.set(c.x+250,320,c.z+400)}
   ready=true;const g=$('#go');g.disabled=false;g.textContent='Start smashing';
-  $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · '+st.measured+' mapped heights';
+  $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · heights: '+st.tagged+' mapped, '+st.lidar.toLocaleString()+' from lidar'+(D.t?' · '+D.t.length+' trees':'');
   if(PERF)window.__smash={PT,FR,rec(on){frRec=on;if(on)FR.length=0},
     pick(cx,cy){const t=performance.now();const r=pickAt(cx,cy);return {ms:performance.now()-t,k:r?r.k:-2}},
     fireAt(id,x,z){weapon=id;cool[id]=0;fire(new THREE.Vector3(x,0,z),-1)},
@@ -399,6 +526,12 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
         const t0=performance.now();flushAttrs();renderer.render(scene,camera);gl.readPixels(0,0,1,1,6408,5121,px);if(f>1)t.push(performance.now()-t0)}
       geo.setDrawRange(0,Infinity);scene.remove(city);for(const t of tiles)t.m.visible=true;renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
     hitK(k,amt,paint){return hit(k,amt,paint)},
+    layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
+    me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
+    loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
+    // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer
+    probe(){shakeAmt=0;renderer.render(scene,camera);const gl=renderer.getContext(),w=gl.drawingBufferWidth,h=gl.drawingBufferHeight,p=new Uint8Array(4),o=[];
+      for(const fx of [.25,.5,.75])for(const fy of [.3,.5,.7]){gl.readPixels(w*fx|0,h*fy|0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);o.push(...p)}return o},
     particleTest(){const t=controls.target;spawnDebris(t.x,40,t.z,new THREE.Color(0x00ff00),80,0);spawnPuff(t.x+60,30,t.z,0xff00ff,12,12,0)},
     dmg(){let d=0;for(let k=0;k<nB;k++)d+=bMax[k]-Math.max(0,bHp[k]);return d}};
 }).catch(err=>{$('#go').textContent='Map failed to load';$('#load').textContent='Could not load the campus data ('+err.message+'). Reload to try again.'});

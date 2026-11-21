@@ -30,21 +30,27 @@ Vite 프로젝트다. 루트는 `web/`이고 three.js는 npm 패키지(정확한
 ## 데이터 다시 만들기
 
 ```bash
-npm run data
+npm run data                               # OSM 다시 받기 + 지면 + 건물
+pip install -r tools/requirements.txt      # 라이다 단계에만 필요 (numpy, scipy, laspy)
+npm run data:lidar                         # 라이다 받기(약 360MB) + 높이 측정 + 건물 다시 빌드
 ```
 
 | 단계 | 스크립트 | 결과물 |
 |---|---|---|
 | OSM 타일 49개 다운로드 (API 0.6) | `tools/fetch_osm_tiles.sh` | `data/tiles/*.osm` (약 40MB, git 제외) |
-| 노드·웨이·릴레이 병합 | `tools/parse_osm.py` | `data/raw.json` (git 제외) |
-| 도로·공원·연못·사바나강 | `tools/build_ground.py` | `data/ground.json` (git 제외) |
-| 건물 + 3D 태그 | `tools/build_buildings.py` | `web/public/scad-savannah.json` |
+| 노드(태그 포함)·웨이·릴레이 병합 | `tools/parse_osm.py` | `data/raw.json` (git 제외) |
+| 도로·공원·물·강 + 주변 요소(나무, 보도, 철도, 부두, 가로수 줄, 주차장·경기장·수영장·놀이터·묘지·화단) | `tools/build_ground.py` | `data/ground.json` (git 제외) |
+| 건물 + 3D 태그 (+ 라이다 높이가 있으면 반영) | `tools/build_buildings.py` | `web/public/scad-savannah.json`, `data/footprints.json` (git 제외) |
+| USGS 3DEP 라이다 다운로드 | `tools/lidar_fetch.py` | `data/lidar/*.laz` (약 360MB, git 제외) |
+| 라이다로 건물·나무 높이 측정 | `tools/lidar_heights.py` | `data/lidar_heights.json` (커밋됨, 66KB) |
+
+`data/lidar_heights.json`이 커밋돼 있으므로 라이다를 다시 받지 않아도 `npm run data`만으로 같은 결과가 나온다.
 
 범위는 위도 32.044~32.086, 경도 -81.112~-81.082이다. SCAD 건물에서 320m 이내 건물만 남긴다.
 
 ## 3D 모델 규칙 (OSM Simple 3D Buildings)
 
-- 높이: `height` → `building:levels` × 3.2m → 없으면 건물 유형별 추정값 (`est=1`로 표시)
+- 높이: `height` → `building:levels` × 3.2m → 라이다 실측(`est=2`, 지붕 태그가 없는 평지붕 건물만) → 그래도 없으면 건물 유형별 추정값 (`est=1`)
 - 지붕: `roof:shape` 중 flat, gabled, hipped, pyramidal, skillion, dome. gambrel과 saltbox는 gabled로, mansard는 hipped로 단순화. `roof:height`, `roof:levels`, `roof:orientation`, `roof:direction` 반영
 - `building:part`와 `min_height`, `building:min_level` 반영. 부속 건물이 본체 면적의 70% 이상을 덮으면 본체 윤곽은 숨김
 - 멀티폴리곤 중정(inner ring)은 구멍으로 처리
@@ -52,14 +58,31 @@ npm run data
 
 지붕 면은 "평면들의 최솟값"으로 정의하고, 각 평면이 최소인 영역으로 윤곽을 잘라 삼각분할한다. 벽은 평면이 바뀌는 지점에 점을 끼워 넣어 박공 끝이 지붕선까지 올라간다. 자세한 내용은 `web/geom.js`에 있다.
 
-## 현재 데이터 현황 (2026-11-20 OSM 기준)
+## 라이다 높이 (USGS 3DEP)
+
+- 출처: USGS 3DEP 라이다 `GA_Statewide_B5_2018`(2018년 비행, 미국 정부 공개 데이터). AWS의 Entwine Point Tile 사본(`s3://usgs-lidar-public`)에서 지도 범위에 닿는 노드만 받는다(점 약 4,800만 개)
+- 지면: 지면 분류(2) 점의 2m 격자 중앙값. 건물 아래처럼 빈 칸은 가장 가까운 지면 값으로 채운다
+- 건물: OSM 윤곽 안(중정 제외)의 건물 분류(6) 점 고도 중앙값 − 그 아래 지면. 중앙값이라 경사 지붕도 부피가 비슷한 평지붕 높이가 된다. 윤곽 안 첫 반사 중 건물 점이 50% 미만이거나 6개 미만이면 재지 않는다(나무에 가림, 2018년 이후 신축 등)
+- 나무: OSM 나무 노드 4m 안 식생 분류(3~5) 점의 95백분위 고도 − 지면, 수관 반경은 윗부분 점의 90백분위 거리. 2~35m 범위만 쓴다
+- 검증: 층수 태그가 있는 평지붕 건물 187개와 비교하면(층수×3.2+0.8m), 라이다 − OSM 중앙 오차 +0.43m, 평균 절대 오차 2.61m, 74%가 ±3m 이내. 높이 태그 건물은 재지는 조건에 맞는 게 5개뿐이라 판단 근거로 쓰지 않는다
+- 한계: 2018년 이후 생기거나 바뀐 건물은 틀릴 수 있다. 지붕 모양은 라이다로 추측하지 않는다(태그가 없으면 평지붕)
+
+## 현재 데이터 현황 (2026-11-21 OSM 기준)
 
 - 건물 4,497개, 이 중 SCAD 71개
 - 지붕 모양이 매핑된 건물 278개, 높이·층수가 매핑된 건물 489개
-- SCAD 71개 중 지붕 모양이 있는 건물 2개(Eichberg Hall, Arnold Hall), 높이를 추정한 건물 37개
+- 태그 없는 건물 4,008개 중 3,408개는 라이다 실측 높이, 600개는 추정값
+- SCAD 71개 중 지붕 모양이 있는 건물 2개(Eichberg Hall, Arnold Hall). 높이 태그 없는 SCAD 37개 중 34개는 라이다 실측, 3개는 추정값
+- 나무 420그루(OSM), 이 중 400그루는 라이다로 높이·수관 반경 측정. 보도 2,530개, 철도 75개, 부두 32개, 가로수 줄 29개, 면 326개(주차장 216, 수영장 59, 놀이터 16, 경기장 12, 화단 10, 묘지 9, 부두 데크 4)
 
 SCAD 판정 기준: 이름이나 operator에 SCAD 또는 Savannah College of Art가 들어간 건물, `building=college`인 건물, 이름으로 확인된 기숙사(The Hive 동, Sail, Sand, Oglethorpe House, Montgomery House, Turner House).
 
 ## 라이선스와 출처
 
 지도 데이터 © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/). `web/public/scad-savannah.json`은 OSM 파생 데이터베이스이므로 ODbL을 따른다.
+
+높이 측정에 쓴 라이다는 USGS 3D Elevation Program(3DEP) 데이터로 미국 정부 공개 자료(public domain)다. 게임 화면에도 출처를 표기한다.
+
+## 내 위치(GPS)
+
+과녁 버튼을 누르면 브라우저 위치 권한을 요청한다. 위치는 기기 안에서 지도 표시에만 쓰고 어디로도 보내지 않는다. 지도 범위 안이면 파란 표시와 정확도 원을 그리고 그쪽으로 카메라가 이동한다. 범위 밖이면 거리만 알려 준다. https 페이지(또는 localhost)에서만 동작한다.

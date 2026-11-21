@@ -1,7 +1,7 @@
 {
   "name": "smash-scad",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Unofficial fan game: smash a 3D model of SCAD Savannah built from OpenStreetMap",
   "scripts": {
@@ -9,9 +9,10 @@
     "build": "vite build",
     "preview": "vite preview --port 8765 --strictPort",
     "test": "node --test tests/*.test.js",
-    "e2e": "node tests/e2e/smoke.mjs --url http://localhost:8765/",
+    "e2e": "node tests/e2e/smoke.mjs --url http://localhost:8765/ && node tests/e2e/mobile.mjs --url http://localhost:8765/",
     "perf": "node tools/perf/measure.mjs --url http://localhost:8765/",
-    "data": "bash tools/fetch_osm_tiles.sh && python3 tools/parse_osm.py && python3 tools/build_ground.py && python3 tools/build_buildings.py"
+    "data": "bash tools/fetch_osm_tiles.sh && python3 tools/parse_osm.py && python3 tools/build_ground.py && python3 tools/build_buildings.py",
+    "data:lidar": "python3 tools/lidar_fetch.py && python3 tools/lidar_heights.py && python3 tools/build_buildings.py"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

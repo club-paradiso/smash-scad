@@ -5,3 +5,5 @@ data/ground.json
 __pycache__/
 *.png
 dist/
+data/lidar/
+data/footprints.json

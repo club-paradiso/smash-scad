@@ -13,5 +13,5 @@ while la<lat1:
     print(f"{lo:.4f},{la:.4f},{min(lo+dn,lon1):.4f},{min(la+dl,lat1):.4f}"); lo+=dn
   la+=dl
 PY
-xargs -P 4 -I{} sh -c 'curl -sS -m 100 -o "data/tiles/$(echo {} | tr , _).osm" "https://api.openstreetmap.org/api/0.6/map?bbox={}"' < data/tiles/list.txt
+xargs -P 2 -I{} sh -c 'curl -sS -m 100 -o "data/tiles/$(echo {} | tr , _).osm" "https://api.openstreetmap.org/api/0.6/map?bbox={}"' < data/tiles/list.txt
 echo "tiles: $(ls data/tiles/*.osm | wc -l)"

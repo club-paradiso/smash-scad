@@ -8,18 +8,19 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - `web/index.html`: HUD 마크업과 CSS. `<script type="module" src="./src/main.js">`
 - `web/src/main.js`: 게임 전체(three.js 씬, 무기, 점수, 파티클, 사운드). ES 모듈. OrbitControls는 `three/addons/controls/OrbitControls.js`
 - `web/geom.js`: 순수 지오메트리 ES 모듈 `building(THREE, rec)`(default export `SG`도 있음). 게임과 node 테스트 공용
-- `web/public/scad-savannah.json`: `{v:2, b:[건물], r:[도로], p:[공원], w:[연못], river:[강 폴리곤]}`. `tools/build_buildings.py`가 여기에 쓴다
+- `web/public/scad-savannah.json`(v3): `{v:3, b:[건물], r:[도로 [w,flat]], p:[공원], w:[물], river, t:[나무 [x,z,침엽1,높이,수관반경]], tr:[가로수 줄], f:[보도], rl:[철도], pl:[부두 선], a:[[종류,면]]}`. a 종류: 0 주차장, 1 경기장, 2 수영장, 3 놀이터, 4 묘지, 5 부두 데크, 6 화단. 나무 높이 0 = 라이다 측정 없음. `tools/build_buildings.py`가 여기에 쓴다
+- 라이다: `tools/lidar_fetch.py`(USGS 3DEP `GA_Statewide_B5_2018`, S3 EPT) → `tools/lidar_heights.py` → `data/lidar_heights.json`(커밋됨). 파이썬 의존성은 `tools/requirements.txt`. 방법과 검증은 README "라이다 높이"
 - `tools/`: OSM 타일 다운로드 → 파싱 → 지면 레이어 → 건물 빌드
 - `tools/perf/`: `measure.mjs`(성능 측정), `shots.mjs`(비교 캡처), `upload_ranges.mjs`, `lod_stats.mjs`. 결과와 방법은 `docs/perf.md`, 원자료는 `docs/perf-data/`
-- `tests/*.test.js`: `npm test`(node). `tests/e2e/smoke.mjs`: `npm run e2e`(Playwright, `npm run preview`를 띄운 상태에서)
-- 주소에 `?perf`를 붙이면 측정 훅 `window.__smash`가 켜진다(로드 시점 `PT`, 프레임 로그 `rec/FR`, `pick`, `fireAt`, `bench`, `dmg`, `alive`). 없으면 게임 동작은 같다. 스모크 테스트도 이 훅으로 게임 상태를 읽는다
+- `tests/*.test.js`: `npm test`(node: 지붕, 데이터 v3, BVH 피킹). `npm run e2e`(Playwright, `npm run preview`를 띄운 상태에서): `tests/e2e/smoke.mjs`(1280·390px)와 `tests/e2e/mobile.mjs`(iPhone 13 세로·가로, Pixel 7 에뮬레이션: 터치, 바텀시트, GPS 안·밖·거부, 컨텍스트 손실 복구, 해상도 자동 조절)
+- 주소에 `?perf`를 붙이면 측정 훅 `window.__smash`가 켜진다(로드 시점 `PT`, 프레임 로그 `rec/FR`, `pick`, `fireAt`, `bench`, `dmg`, `alive`, `me`, `dpr`, `layer`, `loseContext/restoreContext`, `probe`). 없으면 게임 동작은 같다. 스모크 테스트도 이 훅으로 게임 상태를 읽는다
 
 ### 건물 레코드 `b[i]`
 `[scad, name, outer(flat x,z), holes[[flat]], minH, wallTop, roofH, shape, obb[cx,cz,ang,hl,hw], wallCol, roofCol, est]`
 - 좌표: 미터 단위 로컬 좌표, 원점은 위도 32.0745, 경도 -81.0945. x는 동쪽, z는 남쪽(z = -북쪽)
 - shape: 0 flat, 1 gabled, 2 hipped, 3 pyramidal, 4 skillion, 5 dome
 - obb의 u축(ang)은 용마루 방향. skillion은 +v가 내리막
-- est=1: 높이·층수 태그 없음(추정값)
+- est: 0 OSM 높이·층수 태그, 1 태그도 라이다 측정도 없음(건물 유형별 추정값), 2 태그 없음 → 라이다 실측(평지붕 레코드만)
 
 ## 렌더링 핵심
 - 모든 건물을 non-indexed BufferGeometry 하나(`geo`)로 병합. 건물 k의 정점 범위는 `vStart[k]`, `vCount[k]`. 삼각형→건물 매핑은 `faceB`
@@ -29,7 +30,15 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - 탭 판정은 three-mesh-bvh(`MeshBVH`, `indirect:true`, `acceleratedRaycast`). 지오메트리가 non-indexed 그대로라 faceIndex→`faceB`가 유지된다. BVH는 무너지기 전 위치 기준(이전 레이캐스트와 같음)
 - r147 화면을 유지하려고 `ColorManagement.enabled=false`, `outputColorSpace=LinearSRGBColorSpace`, 조명 세기 ×π(r155에서 레거시 조명 제거). 이 셋을 바꾸면 색과 밝기가 달라진다
 - `logarithmicDepthBuffer` 사용(지면 레이어의 z-fighting 방지)
+- 지면 레이어(물, 공원, 도로, 면, 보도, 철도, 부두, 가로수 줄)는 정점 색 지오메트리 하나를 건물과 같은 400m 타일로 나눠 컬링한다. 레이어 순서는 y 오프셋(0.04~0.3)
+- 나무는 InstancedMesh 3개(활엽 수관, 침엽 원뿔, 줄기). 폭발(페인트 제외)에 쓰러지고 복구 버튼으로 선다
 - 파티클은 InstancedMesh 2개(debris 700, puffs 360)
+
+## 모바일
+- 해상도 자동 조절: 픽셀 비율 min(기기,2)에서 시작, 프레임 평균 24ms 초과면 0.25씩 내리고(최저 1) 13ms 미만이 이어지면 올린다(`adaptResolution`). 픽셀 비율 2 이상이면 MSAA 끔
+- WebGL 컨텍스트 손실: three가 복구, 2.5초 안에 복구 안 되면 새로고침 토스트. 페이지가 숨겨지면 오디오 정지
+- 휴대폰 세로: 건물 목록은 바텀시트(끌어내려 닫기), 가로(높이 500px 이하): 무기 도크가 오른쪽 세로. 인트로는 스크롤되고 시작 버튼은 하단 고정
+- GPS: `watchPosition`. 위치는 기기 밖으로 보내지 않는다. 지도 범위(위도 32.044~32.086, 경도 -81.112~-81.082) 안이면 표시·이동, 밖이면 거리 안내. 보안 컨텍스트(https, localhost)에서만
 
 ## 원칙
 - 데이터 날조 금지. 태그 없는 건물에 지붕 모양을 추측해서 넣지 않는다. 추정값은 `est`로 구분
@@ -38,21 +47,22 @@ SCAD 사바나 캠퍼스를 OSM 데이터로 3D화해서 부수는 비공식 팬
 - 실행하지 않은 테스트, 측정하지 않은 성능은 주장하지 않는다. 구현됨 / 검증됨 / 미검증 / 막힘을 구분해 보고
 - 데이터를 다시 만들 때는 `npm test`로 지붕 면적 일치(±3%)와 SCAD 71개 유지를 확인. 건물 수가 바뀌면 테스트 기대값을 근거와 함께 갱신
 
-## 검증 상태 (v0.3.0, 2026-11-20)
-- 검증됨: `npm test` 10/10 통과(지붕·데이터 8개 + BVH 피킹이 기존 레이캐스트와 같은 삼각형을 돌려주는지 2개). `npm run build` 성공. 헤드리스 Chromium 157(SwiftShader)에서 `npm run e2e` 통과: 1280px·390px 로드, 무기 6종 모두 피해, 점수·랭크, 건물 목록·검색, 복구 버튼, 비공식 고지·OSM 표기, 콘솔 에러 없음
-- 검증됨: r147 원본과 최종 빌드의 렌더가 HUD를 숨기면 1280px에서 픽셀 동일, 390px에서 1px(1/255) 차이. 피해·페인트 상태도 동일. InstancedMesh 색은 눈으로 비교해 같음
-- 측정됨(SwiftShader 기준, `docs/perf.md`): 탭 레이캐스트 5.0 → 0.1ms 미만, 기본 시점 삼각형 134,513 → 47,783, 핵 기준 프레임당 업로드 4,053 → 181KB/속성. SwiftShader FPS(6~12)는 실기기 성능이 아니다
-- 미검증: 실제 GPU·휴대폰의 FPS와 프레임 시간, iPhone Safari 로드·터치 조작, 저사양 기기의 BVH 생성 시간(SwiftShader 환경에서 53ms), 사운드
-- 막힘: 이 개발 컨테이너에서는 jsDelivr가 막혀 있어 r147 원본은 측정 때 npm의 같은 파일로 대신 응답했다(`--cdn` 옵션). 지금 빌드는 CDN을 쓰지 않는다
+## 검증 상태 (v0.4.0, 2026-11-21)
+- 검증됨: `npm test` 15/15(지붕·데이터·BVH 피킹). `npm run build` 성공. 헤드리스 Chromium 157(SwiftShader)에서 `npm run e2e` 통과: 1280px·390px 스모크, iPhone 13 세로·가로와 Pixel 7 에뮬레이션(시작·고지 스크롤, 무기, 바텀시트, GPS 지도 안·밖·권한 거부, WebGL 컨텍스트 손실 후 같은 화면으로 복구, 해상도 자동 조절 2→1), 콘솔 에러 없음
+- 검증됨: OSM 파이프라인 재실행 결과가 v0.3.0 데이터와 바이트 단위로 동일(주변 레이어 추가 전 기준). 라이다 높이는 층수 태그 건물 187개 대비 중앙 오차 +0.43m, 74%가 ±3m 이내
+- 측정됨(SwiftShader 기준, `docs/perf.md`): 주변 요소 추가로 기본 시점 삼각형 47,783 → 58,457, FPS 12.0 → 8.7(1280×800), 26.9 → 19.9(390×844). 실기기 성능이 아니다
+- 미검증: 실제 iPhone Safari(WebKit은 이 환경에 없음)·Android·GPU 데스크톱의 FPS, 터치 감, 진동, 실제 GPS 정확도, 실기기 컨텍스트 손실, 사운드
+- 막힘: 항공사진(USGS 영상, NAIP)과 OSM 외 지도 서비스는 이 환경 네트워크에서 막혀 있어 시도하지 않았다. 라이다(AWS S3)와 OSM API는 `smash-scad` 환경에서 열려 있다
 
 ## 다음 작업 후보 (우선순위 순)
-1. 실기기 측정: iPhone Safari·Android Chrome·GPU 데스크톱에서 `?perf` 훅으로 FPS·로드 시간을 재서 `docs/perf.md`에 추가. 결과에 따라 타일 크기(400m)와 BVH 생성 비용을 다시 판단. 거리 LOD는 SwiftShader에서 효과가 없어 뺐으니 실기기에서 정점이 병목으로 나올 때만 다시 검토
-2. 공유 랭킹: 원작처럼 일간·전체 점수(Supabase 등), 1인당 기여 상한, 학교 코드와 점수만 전송
-3. 캠퍼스 확장: SCAD Atlanta, Lacoste. `tools/`의 bbox와 SCAD 판정 규칙을 캠퍼스 설정 파일로 분리
-4. 지형: Savannah는 평지라 생략했지만, 확장 캠퍼스에는 AWS Terrain Tiles(SRTM 30m)가 필요할 수 있음
-5. 한국어 UI 토글
-6. OSM 기여: 태그 없는 SCAD 건물 37개의 층수·지붕 태그 목록을 뽑아 실제 OSM 편집을 돕기(직접 OSM 편집은 사용자만)
-7. 번들 크기: 지금 JS 한 파일 838KB(gzip 218KB). three를 이름 import로 바꿔 트리 셰이킹이 되는지 확인
+1. 실기기 측정: iPhone Safari·Android Chrome에서 `?perf` 훅으로 FPS·로드 시간·해상도 자동 조절 결과를 재서 `docs/perf.md`에 추가. 나무·지면 비용(SwiftShader에서 FPS −25%)이 실기기에서도 문제면 나무를 타일별로 나누거나 먼 거리에서 숨기기
+2. 라이다 이상치 점검: 높이 태그와 크게 다른 건물(예: 20m 태그인데 라이다 3.8m)을 목록으로 뽑아 2018년 이후 신축인지 확인, OSM 편집 후보로 정리(직접 편집은 사용자만)
+3. 항공사진 바닥 텍스처: NAIP(공개 데이터)를 받을 수 있는 호스트가 열리면 지면에 입히기. 라이선스가 불분명한 상용 지도 타일은 쓰지 않는다
+4. 공유 랭킹: 원작처럼 일간·전체 점수(Supabase 등), 1인당 기여 상한, 학교 코드와 점수만 전송
+5. 캠퍼스 확장: SCAD Atlanta, Lacoste. `tools/`의 bbox와 SCAD 판정 규칙, 라이다 데이터셋 이름을 캠퍼스 설정 파일로 분리
+6. 지형: Savannah는 평지라 생략. 확장 캠퍼스에는 라이다 지면 격자를 그대로 지형으로 쓸 수 있음
+7. 한국어 UI 토글
+8. 번들 크기: JS 한 파일 약 850KB(gzip 약 220KB). three 트리 셰이킹 확인
 
 ## 하지 않는 것
 - Vercel 배포 금지(소유자 결정). Vercel 프로젝트 생성·연결·배포 설정 파일(vercel.json 등)을 만들지 않는다. 다른 호스팅에 배포하는 것도 소유자 지시가 있을 때만
