@@ -66,8 +66,9 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
 .pop.big{font-size:20px;color:var(--y);font-stretch:115%}
 @keyframes up{to{transform:translate(-50%,-180%);opacity:0}}
 #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}
-#intro{position:fixed;inset:0;display:grid;place-items:center;background:rgba(8,8,8,.72);z-index:9;padding:20px}
-#card{max-width:460px;width:100%;padding:26px 24px;border-radius:20px;background:var(--k);border:2px solid var(--y)}
+#intro{position:fixed;inset:0;display:flex;background:rgba(8,8,8,.72);z-index:9;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain}
+#card{max-width:460px;width:100%;margin:auto;padding:26px 24px;border-radius:20px;background:var(--k);border:2px solid var(--y)}
+#card .gobar{position:sticky;bottom:-2px;margin:0 -24px;padding:10px 24px 4px;background:linear-gradient(transparent,var(--k) 22%)}
 #card h1{margin:0 0 4px;font-weight:900;font-style:italic;font-stretch:125%;font-size:clamp(40px,11vw,58px);line-height:.95;letter-spacing:-1px}
 #card h1 i{color:var(--y);font-style:inherit}
 #card p{margin:10px 0;color:#d9d4c8}
@@ -77,8 +78,42 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
 #card a{color:var(--y)}
 #load{font-size:13px;color:var(--mut);text-align:center;margin-top:8px;min-height:1em}
 #credit{position:fixed;right:max(8px,env(safe-area-inset-right));bottom:calc(env(safe-area-inset-bottom) + 92px);font-size:10.5px;color:#26313a;opacity:.8;pointer-events:none}
-@media(max-width:600px){#brand{display:none}.bst{display:none}#scorebox{gap:8px;padding:8px 10px}#tools{gap:0;padding:4px}.ib{width:40px}#hint{white-space:normal;text-align:center;width:max-content;max-width:calc(100vw - 24px)}#rank{font-size:28px;min-width:44px}#score{font-size:18px}.wp{width:54px;height:60px;font-size:10px}.wp svg{width:26px;height:26px}#zones{top:calc(env(safe-area-inset-top) + 76px)}#hint{bottom:calc(env(safe-area-inset-bottom) + 86px);font-size:12px}#credit{bottom:calc(env(safe-area-inset-bottom) + 82px)}}
-@media(prefers-reduced-motion:reduce){.pop{animation-duration:.01s}}
+@media(max-width:600px){#brand{display:none}.bst{display:none}#scorebox{gap:8px;padding:8px 10px}#tools{gap:0;padding:4px}.ib{width:40px}#hint{white-space:normal;text-align:center;width:max-content;max-width:calc(100vw - 24px)}#rank{font-size:28px;min-width:44px}#score{font-size:18px}.wp{width:54px;height:60px;font-size:10px}.wp svg{width:26px;height:26px}#zones{top:calc(env(safe-area-inset-top) + 76px)}#hint{bottom:calc(env(safe-area-inset-bottom) + 104px);font-size:12px}#credit{bottom:calc(env(safe-area-inset-bottom) + 82px)}}
+#toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 132px);transform:translate(-50%,-8px);max-width:calc(100vw - 32px);padding:10px 14px;font-size:14px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:8;text-align:center}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#toast button{pointer-events:auto;margin-left:8px;padding:4px 10px;border-radius:8px;background:var(--y);color:var(--k);font-weight:900}
+#gps.on{color:var(--y)}
+#gps.wait svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#list .grab{display:none}
+#hint .short{display:none}
+/* phones: building list becomes a bottom sheet, thumb-reachable */
+@media(max-width:600px){
+  #list{top:auto;left:0;right:0;width:auto;height:min(72dvh,560px);border-radius:18px 18px 0 0;transform:translateY(105%);padding:8px 14px calc(env(safe-area-inset-bottom) + 10px)}
+  #list.open{transform:none}
+  #list .grab{display:block;width:44px;height:5px;border-radius:3px;background:#555;margin:2px auto 4px}
+  #bl button{min-height:48px}
+  #list.glass{background:rgba(13,13,13,.97)}
+  #meta .long,#hint .long{display:none}#hint .short{display:inline}
+}
+/* phones in landscape: short screen, so slimmer HUD and the weapon dock moves to the right edge */
+@media(max-height:500px) and (orientation:landscape){
+  #brand{display:none}
+  #top{top:calc(env(safe-area-inset-top) + 6px);right:calc(max(10px,env(safe-area-inset-right)) + 82px)}
+  #scorebox{padding:4px 10px}#rank{font-size:24px;min-width:40px}#score{font-size:16px}#bar{margin:3px 0 2px}
+  .ib{width:40px;height:40px}
+  #zones{top:calc(env(safe-area-inset-top) + 62px);right:calc(max(10px,env(safe-area-inset-right)) + 82px)}
+  #zones button{min-height:34px;padding:6px 11px}
+  #dock{left:auto;right:max(8px,env(safe-area-inset-right));top:calc(env(safe-area-inset-top) + 6px);bottom:calc(env(safe-area-inset-bottom) + 6px);transform:none;flex-direction:column;overflow-y:auto;overflow-x:hidden;max-width:none;width:70px}
+  .wp{width:56px;height:46px;font-size:9.5px;gap:1px}.wp svg{width:21px;height:21px}#dock{gap:4px;padding:5px}
+  #hint{display:none}
+  #credit{bottom:calc(env(safe-area-inset-bottom) + 4px);right:calc(max(8px,env(safe-area-inset-right)) + 82px)}
+  #toast{top:calc(env(safe-area-inset-top) + 104px)}
+  #list{width:min(360px,60vw);height:auto;top:0;left:auto;right:0;bottom:0;border-radius:16px 0 0 16px;transform:translateX(105%)}
+  #list.open{transform:none}#list .grab{display:none}
+}
+canvas#c{-webkit-touch-callout:none}
+@media(prefers-reduced-motion:reduce){.pop{animation-duration:.01s}#gps.wait svg{animation:none}}
 </style>
 </head>
 <body>
@@ -93,22 +128,25 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
     <div id="sc">
       <div id="score">0</div>
       <div id="bar"><i></i></div>
-      <div id="meta"><span>SCAD down <b id="lev">0/0</b></span><span class="bst">Best <b id="best">0</b></span></div>
+      <div id="meta"><span>SCAD<span class="long"> down</span> <b id="lev">0/0</b></span><span class="bst">Best <b id="best">0</b></span></div>
     </div>
     <div id="combo">x1</div>
   </div>
   <div id="tools" class="glass">
+    <button class="ib" id="gps" aria-label="Show my location" title="My location"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
     <button class="ib" id="snd" aria-label="Sound on/off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9h4l5-4v14l-5-4H4z"/><path id="wave" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
     <button class="ib" id="lsb" aria-label="SCAD building list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
     <button class="ib" id="rst" aria-label="Rebuild campus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 3v5.5h5.5"/></svg></button>
   </div>
 </div>
 <div id="zones"></div>
-<div id="hint" class="glass">Tap a building to attack · drag to move · two fingers to rotate / zoom</div>
+<div id="hint" class="glass"><span class="long">Tap a building to attack · drag to move · two fingers to rotate / zoom</span><span class="short">Tap to attack · drag to move · pinch to zoom</span></div>
 <div id="dock" class="glass"></div>
 <div id="credit">Map data © OpenStreetMap contributors (ODbL) · Heights: USGS 3DEP lidar</div>
 
+<div id="toast" class="glass" role="status" aria-live="polite"></div>
 <aside id="list" class="glass" aria-label="SCAD buildings">
+  <div class="grab" aria-hidden="true"></div>
   <div style="display:flex;justify-content:space-between;align-items:center"><h2>SCAD buildings</h2><button class="ib" id="lsx" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <input id="q" placeholder="Search: Poetter, Jen, Hive…" autocomplete="off">
   <div id="bl"></div>
@@ -120,12 +158,12 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
     <p>Crit week got you? Go ahead, wreck the Savannah campus. Every SCAD building here is drawn from its real OpenStreetMap footprint.</p>
     <ul>
       <li>Tap a building to drop the selected weapon</li>
-      <li>Phone: one finger moves, two fingers rotate and zoom</li>
+      <li>Phone: one finger moves, two fingers rotate and zoom. The target button shows where you are (your location stays on your phone)</li>
       <li>Desktop: drag to move, right-drag or Shift-drag to rotate, wheel to zoom</li>
       <li>SCAD buildings (yellow) are worth 5× the points</li>
     </ul>
-    <button class="go" id="go" disabled>Loading map…</button>
-    <div id="load"></div>
+    <div class="gobar"><button class="go" id="go" disabled>Loading map…</button>
+    <div id="load"></div></div>
     <p class="fine">Unofficial fan game, not affiliated with or endorsed by Savannah College of Art and Design. No logos used. Inspired by <a href="https://smash-univ.app" target="_blank" rel="noopener">SMASH 대학교</a>. Building outlines, levels, roof shapes, building parts and courtyards come from OpenStreetMap 3D tags (© OpenStreetMap contributors). Where a building has no height tag, its height is measured from USGS 3DEP lidar (2018 flight, public domain); if the lidar can't tell (newer building, tree cover), the height is estimated. Buildings without a roof tag get a flat roof. Trees, paths, parking, pools and piers are drawn only where OpenStreetMap maps them.</p>
   </div>
 </div>

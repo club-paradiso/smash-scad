@@ -45,9 +45,23 @@ const canvas=$('#c');
 // light levels were tuned on r147 (no colour management, linear output, legacy lights), so keep that look:
 // colours stay raw, output stays linear, and light intensities get the factor of PI that r147 applied internally.
 THREE.ColorManagement.enabled=false;
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,logarithmicDepthBuffer:true});
+// MSAA costs a lot of fill rate on phones; at 2x+ pixel density the jaggies are too small to see, so skip it there.
+const renderer=new THREE.WebGLRenderer({canvas,antialias:devicePixelRatio<2,logarithmicDepthBuffer:true,powerPreference:'high-performance'});
 renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+// Adaptive resolution: start at min(device ratio, 2); if frames run slow for ~1.5 s, step the pixel ratio down
+// (to 1 at the lowest), and step back up after a long run of fast frames. The HUD is HTML and stays sharp.
+const DPR_MAX=Math.min(devicePixelRatio||1,2);let dpr=DPR_MAX;
+renderer.setPixelRatio(dpr);
+const adapt={acc:0,n:0,good:0};
+function adaptResolution(ms){
+  if(document.hidden||ms>250)return; // ignore resume hitches
+  adapt.acc+=ms;adapt.n++;if(adapt.n<45)return;
+  const avg=adapt.acc/adapt.n;adapt.acc=adapt.n=0;
+  if(avg>24&&dpr>1){dpr=Math.max(1,+(dpr-.25).toFixed(2));adapt.good=0;applyDpr()}
+  else if(avg<13&&dpr<DPR_MAX){if(++adapt.good>=4){dpr=Math.min(DPR_MAX,+(dpr+.25).toFixed(2));adapt.good=0;applyDpr()}}
+  else adapt.good=0;
+}
+function applyDpr(){renderer.setPixelRatio(dpr);resize()}
 const scene=new THREE.Scene();
 const SKY=new THREE.Color(0xcfdbe2);
 scene.background=SKY;scene.fog=new THREE.Fog(SKY,900,3600);
@@ -61,6 +75,14 @@ controls.maxPolarAngle=1.38;controls.minDistance=35;controls.maxDistance=2600;
 controls.mouseButtons={LEFT:THREE.MOUSE.PAN,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.ROTATE};
 controls.touches={ONE:THREE.TOUCH.PAN,TWO:THREE.TOUCH.DOLLY_ROTATE};
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
+// Phones drop the WebGL context under memory pressure or after long backgrounding. three restores its own
+// state on 'webglcontextrestored' and re-uploads every buffer; if no restore comes, offer a reload.
+let ctxLost=false,ctxTimer=0;
+canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();ctxLost=true;
+  ctxTimer=setTimeout(()=>{if(ctxLost)toast('Graphics were reset by the browser.',{label:'Reload',fn:()=>location.reload()},0)},2500)});
+canvas.addEventListener('webglcontextrestored',()=>{ctxLost=false;clearTimeout(ctxTimer);for(const a of [aL,col])if(a){a.clearUpdateRanges();a.needsUpdate=true}hideToast()});
+// Background tab / locked phone: stop audio; rAF already stops, and the frame clock restarts cleanly.
+document.addEventListener('visibilitychange',()=>{if(!AC)return;if(document.hidden)AC.suspend();else if(!muted)AC.resume()});
 addEventListener('resize',resize);resize();
 
 // ground
@@ -309,7 +331,10 @@ function popAt(x,y,z,text,big){v3.set(x,y,z).project(camera);if(v3.z>1)return;
 
 // ---------- camera shake ----------
 let shakeAmt=0,hudDirty=false;const shakeOff=new THREE.Vector3();
-function shake(a){shakeAmt=Math.min(14,shakeAmt+a)}
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function shake(a){if(REDUCED)return;shakeAmt=Math.min(14,shakeAmt+a);buzz(Math.min(120,a*12))}
+// short vibration on Android (iOS Safari has no Vibration API, so it is a no-op there)
+let lastBuzz=0;function buzz(ms){const t=performance.now();if(muted||t-lastBuzz<120||!navigator.vibrate)return;lastBuzz=t;try{navigator.vibrate(ms|0)}catch(e){}}
 
 // ---------- audio ----------
 let AC=null,noiseBuf=null;
@@ -403,9 +428,53 @@ $('#rst').onclick=()=>{for(let k=0;k<nB;k++){bAlive[k]=1;bHp[k]=bMax[k];wallC[k]
   resetTrees();collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
 $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
 
+// ---------- toast ----------
+let toastT=0;
+function toast(msg,action,ms=3500){const t=$('#toast');t.textContent=msg;
+  if(action){const b=document.createElement('button');b.textContent=action.label;b.onclick=action.fn;t.appendChild(b)}
+  t.classList.add('on');clearTimeout(toastT);if(ms)toastT=setTimeout(hideToast,ms)}
+function hideToast(){$('#toast').classList.remove('on')}
+
+// ---------- my location (GPS) ----------
+// The position is used only on this device to draw a marker; it is never sent anywhere.
+// Local metres use the same origin and scale as tools/build_buildings.py.
+const GEO={lat0:32.0745,lon0:-81.0945,kx:Math.cos(32.0745*Math.PI/180)*111320,kz:110574,box:[32.044,32.086,-81.112,-81.082]};
+const geoToLocal=(lat,lon)=>({x:(lon-GEO.lon0)*GEO.kx,z:-(lat-GEO.lat0)*GEO.kz});
+const inMap=(lat,lon)=>lat>=GEO.box[0]&&lat<=GEO.box[1]&&lon>=GEO.box[2]&&lon<=GEO.box[3];
+let geoWatch=null,geoFirst=true;
+const me=new THREE.Group();me.visible=false;scene.add(me);
+{const dot=new THREE.Mesh(new THREE.CylinderGeometry(3.2,3.2,1.2,24),new THREE.MeshBasicMaterial({color:0x1e88ff}));dot.position.y=1;
+ const rim=new THREE.Mesh(new THREE.CylinderGeometry(4.2,4.2,1,24),new THREE.MeshBasicMaterial({color:0xffffff}));rim.position.y=.8;
+ const acc=new THREE.Mesh(new THREE.CircleGeometry(1,48),new THREE.MeshBasicMaterial({color:0x1e88ff,transparent:true,opacity:.18,depthWrite:false}));acc.rotation.x=-Math.PI/2;acc.position.y=.5;acc.name='acc';
+ const pin=new THREE.Mesh(new THREE.ConeGeometry(3,9,16),new THREE.MeshBasicMaterial({color:0x1e88ff}));pin.rotation.x=Math.PI;pin.position.y=26;pin.name='pin';
+ me.add(acc,rim,dot,pin)}
+function geoStop(){if(geoWatch!==null)navigator.geolocation.clearWatch(geoWatch);geoWatch=null;me.visible=false;$('#gps').classList.remove('on','wait');$('#gps').setAttribute('aria-pressed','false')}
+function geoStart(){
+  if(!('geolocation' in navigator)){toast('This browser has no location access.');return}
+  if(!window.isSecureContext){toast('Location needs a secure (https) page.');return}
+  geoFirst=true;$('#gps').classList.add('wait');$('#gps').setAttribute('aria-pressed','true');
+  geoWatch=navigator.geolocation.watchPosition(p=>{
+    const {latitude:lat,longitude:lon,accuracy}=p.coords;const b=$('#gps');b.classList.remove('wait');b.classList.add('on');
+    if(!inMap(lat,lon)){me.visible=false;if(geoFirst){const c=geoToLocal(lat,lon);const km=Math.hypot(c.x,c.z)/1000;
+      toast(`You are about ${km<10?km.toFixed(1):Math.round(km).toLocaleString()} km from the Savannah map, so there is nothing to show.`)}geoFirst=false;return}
+    const c=geoToLocal(lat,lon);me.position.set(c.x,0,c.z);me.visible=true;
+    const a=me.getObjectByName('acc');a.scale.setScalar(Math.max(5,Math.min(accuracy,300)));
+    if(geoFirst){flyTo(c.x,c.z,320);toast(accuracy>60?`You are here (±${Math.round(accuracy)} m)`:'You are here')}
+    geoFirst=false},
+  e=>{geoStop();toast(e.code===1?'Location permission was declined.':e.code===3?'Could not get a location fix in time.':'Location is unavailable right now.')},
+  {enableHighAccuracy:true,maximumAge:15000,timeout:15000})}
+$('#gps').onclick=()=>{audio();if(geoWatch!==null){geoStop();return}geoStart()};
+
+// ---------- bottom sheet: drag the list down to close (phones) ----------
+{let y0=null;const L=$('#list');
+ L.addEventListener('touchstart',e=>{const t=e.target;if(t.closest('#bl')&&$('#bl').scrollTop>0||t.closest('input'))return;y0=e.touches[0].clientY},{passive:true});
+ L.addEventListener('touchmove',e=>{if(y0===null||innerWidth>600)return;const d=e.touches[0].clientY-y0;if(d>0)L.style.transform=`translateY(${d}px)`},{passive:true});
+ L.addEventListener('touchend',e=>{if(y0===null)return;const d=(e.changedTouches[0]?.clientY??y0)-y0;y0=null;L.style.transform='';if(innerWidth<=600&&d>70)L.classList.remove('open')})}
+
 // ---------- loop ----------
 let last=performance.now();
-function loop(now){requestAnimationFrame(loop);const f0=performance.now();const dt=Math.min(.05,(now-last)/1000);last=now;
+function loop(now){requestAnimationFrame(loop);const f0=performance.now();const frameMs=now-last;const dt=Math.min(.05,frameMs/1000);last=now;
+  if(ctxLost)return;if(ready)adaptResolution(frameMs);
   camera.position.sub(shakeOff);
   if(fly){fly.t+=dt/1.1;const u=Math.min(1,fly.t),e=u<.5?2*u*u:1-(-2*u+2)**2/2;controls.target.lerpVectors(fly.from,fly.to,e);camera.position.copy(controls.target).add(fly.off);if(u>=1)fly=null}
   controls.target.x=Math.max(-1800,Math.min(1300,controls.target.x));controls.target.z=Math.max(-1500,Math.min(3400,controls.target.z));controls.target.y=0;
@@ -413,6 +482,7 @@ function loop(now){requestAnimationFrame(loop);const f0=performance.now();const 
   shakeAmt*=Math.pow(.02,dt);shakeOff.set((Math.random()-.5)*shakeAmt,(Math.random()-.5)*shakeAmt*.6,(Math.random()-.5)*shakeAmt);camera.position.add(shakeOff);
   for(let i=collapsing.length-1;i>=0;i--){const c=collapsing[i];c.t+=dt;const u=Math.min(1,c.t/c.dur),e=u*u;setL(c.k,c.s0+(.03-c.s0)*e,c.lx*Math.sin(u*Math.PI)*.6,c.lz*Math.sin(u*Math.PI)*.6);
     if(Math.random()<.4)spawnPuff(bX[c.k],1,bZ[c.k],0xbdb3a3,3+bR[c.k]*.25,1,5);if(u>=1)collapsing.splice(i,1)}
+  if(me.visible){const p=me.getObjectByName('pin');p.position.y=26+Math.sin(now/300)*3}
   for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.t+=dt;const u=Math.min(1,f.t/f.dur);f.f(u);if(u>=1){f.end();FX.splice(i,1)}}
   if(geo){stepProjectiles(dt);stepQuake(dt);stepParticles(dt);flushAttrs()}
   const t=now/1000;for(const b of document.querySelectorAll('.wp')){const w=WEAPONS.find(x=>x.id==b.dataset.w);const rem=(cool[w.id]||0)-t;b.classList.toggle('wait',rem>0);b.querySelector('.cd').style.width=rem>0&&w.cd?rem/w.cd*100+'%':'0'}
@@ -443,6 +513,11 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
         const t0=performance.now();flushAttrs();renderer.render(scene,camera);gl.readPixels(0,0,1,1,6408,5121,px);if(f>1)t.push(performance.now()-t0)}
       geo.setDrawRange(0,Infinity);scene.remove(city);for(const t of tiles)t.m.visible=true;renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
     hitK(k,amt,paint){return hit(k,amt,paint)},
+    me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
+    loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
+    // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer
+    probe(){shakeAmt=0;renderer.render(scene,camera);const gl=renderer.getContext(),w=gl.drawingBufferWidth,h=gl.drawingBufferHeight,p=new Uint8Array(4),o=[];
+      for(const fx of [.25,.5,.75])for(const fy of [.3,.5,.7]){gl.readPixels(w*fx|0,h*fy|0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);o.push(...p)}return o},
     particleTest(){const t=controls.target;spawnDebris(t.x,40,t.z,new THREE.Color(0x00ff00),80,0);spawnPuff(t.x+60,30,t.z,0xff00ff,12,12,0)},
     dmg(){let d=0;for(let k=0;k<nB;k++)d+=bMax[k]-Math.max(0,bHp[k]);return d}};
 }).catch(err=>{$('#go').textContent='Map failed to load';$('#load').textContent='Could not load the campus data ('+err.message+'). Reload to try again.'});
