@@ -1,5 +1,6 @@
 // Tap picking: the BVH raycast (three-mesh-bvh, indirect mode) must return the same triangles as three's
 // brute-force raycast on the merged, non-indexed city geometry, so faceIndex -> building stays valid.
+// Compared the way the game uses hits: which building is hit at which distance, nearest first.
 import test from 'node:test';
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -8,8 +9,8 @@ import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 import { building } from '../web/geom.js';
 
 const D = JSON.parse(readFileSync(new URL('../web/public/scad-savannah.json', import.meta.url)));
-const P = [];
-for (const b of D.b) { const g = building(THREE, b); for (const v of g.pos) P.push(v) }
+const P = [], FB = [];
+D.b.forEach((b, k) => { const g = building(THREE, b); for (const v of g.pos) P.push(v); for (let t = 0; t < g.pos.length / 9; t++) FB.push(k) });
 const geo = new THREE.BufferGeometry();
 geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
 const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
@@ -36,9 +37,11 @@ test('BVH raycast hits the same triangles as brute force (400 camera rays)', () 
     ray.set(o, t.clone().sub(o).normalize());
     geo.boundsTree = null; const a = ray.intersectObject(plain, false);
     geo.boundsTree = bvh; const b = ray.intersectObject(fast, false);
-    // equal-distance hits (a ray through a shared edge) may come back in either order, so sort ties by faceIndex
-    const key = hs => hs.map(h => [Math.round(h.distance * 1e4), h.faceIndex]).sort((x, y) => x[0] - y[0] || x[1] - y[1]).map(h => h[1]);
+    // A ray through a shared edge or vertex hits 2-3 triangles of one building at one distance, and the two
+    // methods may report a different number of those duplicates. Compare unique (distance, building) pairs.
+    const key = hs => [...new Set(hs.map(h => `${Math.round(h.distance * 1e3)}:${FB[h.faceIndex]}`))].sort();
     assert.deepStrictEqual(key(b), key(a), `ray ${i}`);
+    if (a.length) assert.strictEqual(FB[b[0].faceIndex], FB[a[0].faceIndex], `ray ${i} first building`);
     hits += a.length > 0;
   }
   assert.ok(hits >= 200, `only ${hits} rays hit a building`);

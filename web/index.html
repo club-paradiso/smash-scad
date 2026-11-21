@@ -106,7 +106,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
 <div id="zones"></div>
 <div id="hint" class="glass">Tap a building to attack · drag to move · two fingers to rotate / zoom</div>
 <div id="dock" class="glass"></div>
-<div id="credit">Map data © OpenStreetMap contributors (ODbL)</div>
+<div id="credit">Map data © OpenStreetMap contributors (ODbL) · Heights: USGS 3DEP lidar</div>
 
 <aside id="list" class="glass" aria-label="SCAD buildings">
   <div style="display:flex;justify-content:space-between;align-items:center"><h2>SCAD buildings</h2><button class="ib" id="lsx" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
@@ -126,7 +126,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
     </ul>
     <button class="go" id="go" disabled>Loading map…</button>
     <div id="load"></div>
-    <p class="fine">Unofficial fan game, not affiliated with or endorsed by Savannah College of Art and Design. No logos used. Inspired by <a href="https://smash-univ.app" target="_blank" rel="noopener">SMASH 대학교</a>. Building outlines, levels, roof shapes, building parts and courtyards come from OpenStreetMap 3D tags (© OpenStreetMap contributors). Where a building has no height or roof tag, it gets a flat roof and an estimated height.</p>
+    <p class="fine">Unofficial fan game, not affiliated with or endorsed by Savannah College of Art and Design. No logos used. Inspired by <a href="https://smash-univ.app" target="_blank" rel="noopener">SMASH 대학교</a>. Building outlines, levels, roof shapes, building parts and courtyards come from OpenStreetMap 3D tags (© OpenStreetMap contributors). Where a building has no height tag, its height is measured from USGS 3DEP lidar (2018 flight, public domain); if the lidar can't tell (newer building, tree cover), the height is estimated. Buildings without a roof tag get a flat roof. Trees, paths, parking, pools and piers are drawn only where OpenStreetMap maps them.</p>
   </div>
 </div>
 

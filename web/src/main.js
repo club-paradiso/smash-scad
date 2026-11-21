@@ -84,12 +84,55 @@ function buildGroundLayers(D){
   const wm=flatMesh(water,0x5f93ad);wm.material.color.setHex(0x5a8aa3);
   const park=[];for(const p of D.p)poly(p,.09,0,park);
   const pm=flatMesh(park,0);pm.material.color.setHex(0x8fae63);
-  const rd=[];
-  for(const [w,f] of D.r){const half=w?5.5:3.4;
-    for(let i=0;i+3<f.length;i+=2){const x1=f[i],z1=f[i+1],x2=f[i+2],z2=f[i+3];let dx=x2-x1,dz=z2-z1;const L=Math.hypot(dx,dz)||1;const nx=-dz/L*half,nz=dx/L*half;
-      rd.push(x1+nx,.07,z1+nz,x1-nx,.07,z1-nz,x2+nx,.07,z2+nz, x2+nx,.07,z2+nz,x1-nx,.07,z1-nz,x2-nx,.07,z2-nz)}}
+  const rd=[];for(const [w,f] of D.r)strip(f,w==2?8:w?5.5:3.4,.07,rd);
   const rm=flatMesh(rd,0);rm.material.color.setHex(0x8a857c);
+  if(D.v<3)return;
+  // v3 surroundings, all from OSM tags (tools/build_ground.py): areas by kind, footpaths, rail, piers, tree rows
+  const AREA=[[0x77736d,.075],[0x79a85a,.1],[0x4fb0d6,.105],[0xc8a57c,.1],[0x9db383,.095],[0x8b6b4a,.3],[0xb98aa6,.1]];
+  const byKind=AREA.map(()=>[]);for(const [k,f] of D.a)poly(f,AREA[k][1],0,byKind[k]);
+  byKind.forEach((l,k)=>{if(l.length)flatMesh(l,AREA[k][0])});
+  const fp=[];for(const f of D.f)strip(f,1,.11,fp);if(fp.length)flatMesh(fp,0xd9d1c1);
+  const rl=[];for(const f of D.rl)strip(f,1,.12,rl);if(rl.length)flatMesh(rl,0x5b544d);
+  const pl=[];for(const f of D.pl)strip(f,1.6,.3,pl);if(pl.length)flatMesh(pl,0x8b6b4a);
+  const tr=[];for(const f of D.tr)strip(f,2.5,.13,tr);if(tr.length)flatMesh(tr,0x5f8a3e); // a mapped tree row, not individual trees
+  buildTrees(D.t);
 }
+// flat ribbon of half-width `half` along a polyline, pushed into `out` as triangles at height y
+function strip(f,half,y,out){
+  for(let i=0;i+3<f.length;i+=2){const x1=f[i],z1=f[i+1],x2=f[i+2],z2=f[i+3];const dx=x2-x1,dz=z2-z1;const L=Math.hypot(dx,dz)||1;const nx=-dz/L*half,nz=dx/L*half;
+    out.push(x1+nx,y,z1+nz,x1-nx,y,z1-nz,x2+nx,y,z2+nz, x2+nx,y,z2+nz,x1-nx,y,z1-nz,x2-nx,y,z2-nz)}
+}
+// ---------- trees: OSM natural=tree nodes; height and crown radius measured from 2018 lidar where it found a canopy ----------
+let trees=null;
+const TREE_DEFAULT_H=7,TREE_DEFAULT_R=2.5; // drawn size when lidar found no canopy (est); not a measurement
+function buildTrees(T){
+  if(!T||!T.length)return;
+  const n=T.length,crown=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),new THREE.MeshLambertMaterial(),n),
+    cone=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,7),new THREE.MeshLambertMaterial(),n),
+    trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.18,.26,1,6),new THREE.MeshLambertMaterial({color:0x6b4f3a}),n);
+  trees={T,n,crown,cone,trunk,down:new Uint8Array(n),x:new Float32Array(n),z:new Float32Array(n)};
+  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);scene.add(m)}
+  let nc=0,nn=0;
+  for(let i=0;i<n;i++){const [x,z,needle,h0,r0]=T[i];trees.x[i]=x;trees.z[i]=z;
+    const h=h0||TREE_DEFAULT_H,r=Math.min(r0||TREE_DEFAULT_R,h*.6),tk=Math.max(1,h-r*(needle?1.6:1.4));
+    const c=new THREE.Color(needle?0x3f6b3a:0x5d8a3c).offsetHSL(((i*37)%11-5)/200,0,((i*53)%9-4)/80);
+    T[i].m={x,z,h,r,tk,needle,c};
+    (needle?nn++:nc++)}
+  crown.count=nc;cone.count=nn;trunk.count=n;
+  for(const m of [crown,cone])m.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(m.count*3),3);
+  trees.slot=new Int32Array(n);let a=0,b=0;for(let i=0;i<n;i++)trees.slot[i]=T[i].m.needle?b++:a++;
+  for(let i=0;i<n;i++)placeTree(i,0);
+}
+function placeTree(i,fall){ // fall 0 = standing, 1 = knocked flat and charred
+  const {x,z,h,r,tk,needle,c}=trees.T[i].m,m=needle?trees.cone:trees.crown,s=trees.slot[i];
+  const ty=fall?.05:1;
+  dummy.rotation.set(0,0,0);dummy.position.set(x,tk*ty/2,z);dummy.scale.set(1,tk*ty,1);dummy.updateMatrix();trees.trunk.setMatrixAt(i,dummy.matrix);
+  if(needle){dummy.position.set(x,(tk+r*.8)*ty,z);dummy.scale.set(r,(h-tk)*ty+.01,r)}else{dummy.position.set(x,(tk+r*.7)*ty,z);dummy.scale.set(r,r*.85*ty+.01,r)}
+  dummy.updateMatrix();m.setMatrixAt(s,dummy.matrix);m.setColorAt(s,fall?tmpA.copy(c).lerp(CHAR,.8):c);
+  trees.trunk.instanceMatrix.needsUpdate=m.instanceMatrix.needsUpdate=m.instanceColor.needsUpdate=true;
+}
+function blastTrees(x,z,r){if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
+function resetTrees(){if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
 const TILE=400,TILE_OFF=4000,tiles=[];
 const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
@@ -138,7 +181,7 @@ function buildCity(D){
   // non-indexed and in its original order, so faceIndex still maps to a building through faceB.
   // The BVH is built from the uncollapsed positions, as the plain raycast was (aL only moves vertices in the shader).
   const t0=performance.now();geo.boundsTree=new MeshBVH(geo,{indirect:true});city.raycast=acceleratedRaycast;PT.extraInit=performance.now()-t0;
-  return B.reduce((a,r)=>{a.shaped+=r[7]?1:0;a.measured+=r[11]?0:1;return a},{shaped:0,measured:0});
+  return B.reduce((a,r)=>{a.shaped+=r[7]?1:0;a.tagged+=r[11]==0?1:0;a.lidar+=r[11]==2?1:0;return a},{shaped:0,tagged:0,lidar:0});
 }
 // One mesh per cell, all sharing the city's attribute buffers (uploaded once), each with its own draw range and
 // bounding sphere so three can frustum-cull cells; the camera usually sees about a third of the city.
@@ -244,6 +287,7 @@ function kill(k){
   hudDirty=true;
 }
 function blast(x,z,r,dmg,paint){let kills=0;
+  if(!paint)blastTrees(x,z,r*.8);
   for(let k=0;k<nB;k++){if(!bAlive[k])continue;const d=Math.hypot(bX[k]-x,bZ[k]-z)-bR[k]*.6;if(d<r){const f=1-Math.max(0,d)/r;
     kills+=hit(k,dmg*(.3+.7*f),paint?PAINTS[(Math.random()*PAINTS.length)|0]:0)}}
   return kills;
@@ -356,7 +400,7 @@ $('#q').oninput=renderList;
 $('#bl').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const k=+b.dataset.k;flyTo(bX[k],bZ[k],220);if(innerWidth<700)$('#list').classList.remove('open')});
 $('#snd').onclick=()=>{muted=!muted;$('#wave').style.display=muted?'none':'';audio()};
 $('#rst').onclick=()=>{for(let k=0;k<nB;k++){bAlive[k]=1;bHp[k]=bMax[k];wallC[k].copy(baseW[k]);roofC[k].copy(baseR[k]);setL(k,1,0,0);paintB(k)}
-  collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
+  resetTrees();collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
 $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
 
 // ---------- loop ----------
@@ -383,7 +427,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
   PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();hud();
   const c=centerOf(ZONES[0][1]);if(c){controls.target.set(c.x,0,c.z);camera.position.set(c.x+250,320,c.z+400)}
   ready=true;const g=$('#go');g.disabled=false;g.textContent='Start smashing';
-  $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · '+st.measured+' mapped heights';
+  $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · heights: '+st.tagged+' mapped, '+st.lidar.toLocaleString()+' from lidar'+(D.t?' · '+D.t.length+' trees':'');
   if(PERF)window.__smash={PT,FR,rec(on){frRec=on;if(on)FR.length=0},
     pick(cx,cy){const t=performance.now();const r=pickAt(cx,cy);return {ms:performance.now()-t,k:r?r.k:-2}},
     fireAt(id,x,z){weapon=id;cool[id]=0;fire(new THREE.Vector3(x,0,z),-1)},

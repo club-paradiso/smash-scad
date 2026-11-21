@@ -1,0 +1,4 @@
+# Python packages for tools/lidar_fetch.py and tools/lidar_heights.py (the OSM steps use the standard library only)
+numpy==2.5.3
+scipy==1.16.3
+laspy[lazrs]==2.5.4
