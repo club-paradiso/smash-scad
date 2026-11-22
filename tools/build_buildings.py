@@ -5,7 +5,10 @@ Output record per building:
 shape: 0 flat, 1 gabled, 2 hipped, 3 pyramidal, 4 skillion, 5 dome
 obb axes: u along ang (ridge direction for gabled/hipped), v across. skillion: slope down toward +v.
 est: 0 = height from OSM height/levels tag, 1 = no tag and no lidar measurement (height estimated by building type),
-     2 = no tag, height measured from USGS 3DEP lidar (data/lidar_heights.json, see tools/lidar_heights.py).
+     2 = no tag, height measured from USGS 3DEP lidar (data/lidar_heights.json, see tools/lidar_heights.py),
+     3 = whole shape (roof surface + wall heights) measured from lidar (all SCAD buildings the lidar confirms, and other
+         buildings whose roof is not flat): the record then has
+         a 13th field {v, t, r} (data/lidar_roofs.json, tools/lidar_roofs.py) and web/geom.js draws that instead.
 """
 import json, math, os, re, zlib
 
@@ -161,6 +164,7 @@ sc = [f['c'] for f in foot if f['scad']]
 def near(c, r=320): return any((c[0] - s[0]) ** 2 + (c[1] - s[1]) ** 2 < r * r for s in sc)
 
 LIDAR = json.load(open('data/lidar_heights.json'))['b'] if os.path.exists('data/lidar_heights.json') else {}
+ROOFS = json.load(open('data/lidar_roofs.json'))['b'] if os.path.exists('data/lidar_roofs.json') else {}
 RENAME = {'Eckburg Hall': 'Eichberg Hall', 'Mongomery House': 'Montgomery House', 'Museum of Art': 'SCAD Museum of Art',
           'Lucas Theatre': 'Lucas Theatre for the Arts'}
 out = []; stats = dict(tagged_h=0, roofshape=0, parts=0, holes=0, hidden=len(hidden))
@@ -215,20 +219,25 @@ for f in foot:
     out.append([1 if f['scad'] else 0, nm, r1(f['o']), [r1(h) for h in f['h']], round(minH, 1), round(wallTop, 1),
                 round(roofH, 1), shape, [round(ob[0], 1), round(ob[1], 1), round(ob[2], 4), round(ob[3], 2), round(ob[4], 2)],
                 col(t.get('building:colour')), col(t.get('roof:colour')), est])
+    lr = ROOFS.get(f['key'])
+    if lr and minH == 0 and not f['part']:
+        hs = lr['v'][2::3]
+        out[-1][5] = round(max(hs), 1); out[-1][6] = 0; out[-1][7] = 0; out[-1][11] = 3
+        out[-1].append({'v': lr['v'], 't': lr['t'], 'r': lr['r']})
 
 # footprints for tools/lidar_heights.py (key, outer, holes, tagged height, min height, roof shape, part)
 json.dump([dict(k=f['key'], o=f['o'], h=f['h'], H=num(f['t'].get('height')), L=num(f['t'].get('building:levels')),
                 mh=num(f['t'].get('min_height')) or 0, sh=SHAPES.get(f['t'].get('roof:shape'), 0), part=f['part'],
-                lc=f['t'].get('layer'), ok=f['key'] not in hidden and (f['scad'] or near(f['c'])))
+                lc=f['t'].get('layer'), scad=f['scad'], ok=f['key'] not in hidden and (f['scad'] or near(f['c'])))
            for f in foot], open('data/footprints.json', 'w'))
 old = json.load(open('data/ground.json'))
 # trees: [x, z, leaf(1 needle), height m, crown radius m]; height/radius 0 = lidar found no canopy there
 LT = json.load(open('data/lidar_heights.json'))['t'] if os.path.exists('data/lidar_heights.json') else {}
 trees = [t + LT.get(f'{t[0]},{t[1]}', [0, 0]) for t in old['t']]
-D = {'v': 3, 'b': out, 't': trees, **{k: old[k] for k in ('r', 'p', 'w', 'river', 'tr', 'f', 'rl', 'pl', 'a')}}
+D = {'v': 3, 'b': out, 't': trees, **{k: old[k] for k in ('r', 'p', 'w', 'river', 'tr', 'f', 'rl', 'pl', 'a', 'pn')}}
 json.dump(D, open('web/public/scad-savannah.json', 'w'), separators=(',', ':'))
 print('buildings', len(out), 'scad', sum(o[0] for o in out), stats)
 import collections
 print(collections.Counter(o[7] for o in out), 'scad shapes', collections.Counter(o[7] for o in out if o[0]),
-      'scad est', sum(o[11] == 1 for o in out if o[0]), 'scad lidar', sum(o[11] == 2 for o in out if o[0]),
+      'scad est', sum(o[11] == 1 for o in out if o[0]), 'scad lidar', sum(o[11] == 2 for o in out if o[0]), 'scad lidar 3D', sum(o[11] == 3 for o in out if o[0]), 'all lidar 3D', sum(o[11] == 3 for o in out),
       'all est', sum(o[11] == 1 for o in out), 'all lidar', sum(o[11] == 2 for o in out))

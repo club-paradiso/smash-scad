@@ -58,6 +58,7 @@ function adaptResolution(ms){
   adapt.acc+=ms;adapt.n++;if(adapt.n<45)return;
   const avg=adapt.acc/adapt.n;adapt.acc=adapt.n=0;
   if(avg>24&&dpr>1){dpr=Math.max(1,+(dpr-.25).toFixed(2));adapt.good=0;applyDpr()}
+  else if(avg>34&&dpr<=1&&shadowsOn&&qs.get('shadows')!=='1'){setShadows(false);adapt.good=0} // still slow at the lowest resolution: drop shadows
   else if(avg<13&&dpr<DPR_MAX){if(++adapt.good>=4){dpr=Math.min(DPR_MAX,+(dpr+.25).toFixed(2));adapt.good=0;applyDpr()}}
   else adapt.good=0;
 }
@@ -68,7 +69,28 @@ scene.background=SKY;scene.fog=new THREE.Fog(SKY,900,3600);
 const camera=new THREE.PerspectiveCamera(50,1,1,9000);
 camera.position.set(260,330,420);
 scene.add(new THREE.HemisphereLight(0xfff6e5,0x7d7466,.62*Math.PI));
-const sun=new THREE.DirectionalLight(0xfff0d0,.6*Math.PI);sun.position.set(-400,700,300);scene.add(sun);
+const sun=new THREE.DirectionalLight(0xfff0d0,.6*Math.PI);sun.position.set(-400,700,300);scene.add(sun,sun.target);
+// ---------- sun shadows ----------
+// The shadow box follows the camera target and grows with zoom. Ground layers keep their flat colours; a
+// ShadowMaterial plane just above them adds only the darkening. Turned off for good if frames stay slow at the
+// lowest resolution (see adaptResolution), and can be forced with ?shadows=0/1. Off by default on phones.
+const SUN_DIR=new THREE.Vector3(-400,700,300).normalize();
+const qs=new URLSearchParams(location.search);
+// Phones start without shadows (the extra depth pass is not measured on real phones yet); ?shadows=1 turns them on.
+const PHONE=matchMedia('(pointer: coarse)').matches&&Math.min(screen.width,screen.height)<700;
+let shadowsOn=qs.get('shadows')==='1'||(qs.get('shadows')!=='0'&&!PHONE);
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
+sun.castShadow=shadowsOn;sun.shadow.mapSize.set(innerWidth<=600?1024:2048,innerWidth<=600?1024:2048);
+sun.shadow.bias=-.0015;sun.shadow.normalBias=1.2;sun.shadow.camera.near=10;sun.shadow.camera.far=4000;
+const shadowCatcher=new THREE.Mesh(new THREE.PlaneGeometry(20000,20000),new THREE.ShadowMaterial({opacity:.36,depthWrite:false}));
+shadowCatcher.rotation.x=-Math.PI/2;shadowCatcher.position.y=.32;shadowCatcher.receiveShadow=true;shadowCatcher.renderOrder=1;shadowCatcher.visible=shadowsOn;scene.add(shadowCatcher);
+function updateSun(){
+  if(!shadowsOn)return;
+  const t=controls.target,d=camera.position.distanceTo(t),h=Math.min(1400,Math.max(220,d*1.1)),c=sun.shadow.camera;
+  sun.target.position.copy(t);sun.position.copy(t).addScaledVector(SUN_DIR,2000);
+  if(c.right!==h){c.left=-h;c.right=h;c.top=h;c.bottom=-h;c.updateProjectionMatrix()}
+}
+function setShadows(on){shadowsOn=on;sun.castShadow=on;shadowCatcher.visible=on}
 const controls=new OrbitControls(camera,canvas);
 controls.enableDamping=true;controls.dampingFactor=.12;controls.screenSpacePanning=false;
 controls.maxPolarAngle=1.38;controls.minDistance=35;controls.maxDistance=2600;
@@ -146,7 +168,7 @@ function buildTrees(T){
     trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.18,.26,1,5,1,true),new THREE.MeshLambertMaterial({color:0x6b4f3a}),n);
   // low-poly on purpose (20-face crown, open 5-sided trunk): 420 trees cost ~13k triangles instead of ~44k
   trees={T,n,crown,cone,trunk,down:new Uint8Array(n),x:new Float32Array(n),z:new Float32Array(n)};
-  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.name='trees';scene.add(m)}
+  for(const m of [crown,cone,trunk]){m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);m.name='trees';m.castShadow=true;scene.add(m)}
   let nc=0,nn=0;
   for(let i=0;i<n;i++){const [x,z,needle,h0,r0]=T[i];trees.x[i]=x;trees.z[i]=z;
     const h=h0||TREE_DEFAULT_H,r=Math.min(r0||TREE_DEFAULT_R,h*.6),tk=Math.max(1,h-r*(needle?1.6:1.4));
@@ -168,7 +190,7 @@ function placeTree(i,fall){ // fall 0 = standing, 1 = knocked flat and charred
 }
 function blastTrees(x,z,r){if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
 function resetTrees(){if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
-const TILE=400,TILE_OFF=4000,tiles=[];
+const TILE=400,TILE_OFF=4000,tiles=[];let depthMat=null;
 const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
   const B=D.b;nB=B.length;
@@ -186,8 +208,10 @@ function buildCity(D){
     bMax[k]=bHp[k]=Math.max(40,Math.sqrt(area)*(g.top-minH)*.55);
     const v=(k*2654435761>>>0)%100/100;
     const tw=safeC(rec[9]),tr=safeC(rec[10]);
-    const w=s?new THREE.Color().setHSL(.13,.95,.52+v*.06):(tw||new THREE.Color().setHSL(.08+v*.05,.18+v*.12,.78+v*.1));
-    const rf=s?(rec[7]?new THREE.Color().setHSL(.07,.7,.42):new THREE.Color().setHSL(.12,1,.6)):(tr||(rec[7]?new THREE.Color().setHSL(.03+v*.04,.35,.42+v*.1):w.clone().multiplyScalar(.86)));
+    // Walls: OSM building:colour if tagged, else the same neutral stone/stucco range for every building (SCAD included;
+    // there is no data on real facade colours). SCAD buildings are marked by a yellow roof and their name tag.
+    const w=tw||new THREE.Color().setHSL(.08+v*.05,.18+v*.12,.78+v*.1);
+    const rf=s?new THREE.Color().setHSL(.125,.8,.52+v*.04):(tr||(rec[7]?new THREE.Color().setHSL(.03+v*.04,.35,.42+v*.1):w.clone().multiplyScalar(.86)));
     baseW[k]=w;baseR[k]=rf;wallC[k]=w.clone();roofC[k]=rf.clone();
     G[k]=g;
   }
@@ -210,7 +234,10 @@ function buildCity(D){
   dirtyC.bind(col);dirtyL.bind(aL);
   for(let k=0;k<nB;k++)paintB(k);
   const mat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
-  mat.onBeforeCompile=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
+  const collapse=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
+  mat.onBeforeCompile=collapse;
+  // the shadow pass draws with a depth material; give it the same collapse so falling buildings' shadows shrink too
+  depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking,side:THREE.DoubleSide});depthMat.onBeforeCompile=collapse;
   city=new THREE.Mesh(geo,mat);buildTiles(order,mat);
   // Tap picking goes through a BVH instead of testing all 115k triangles. indirect:true keeps the geometry
   // non-indexed and in its original order, so faceIndex still maps to a building through faceB.
@@ -231,7 +258,7 @@ function buildTiles(order,mat){
     const sph=box.getBoundingSphere(new THREE.Sphere());sph.radius+=box.max.y*.25; // room for a collapsing building's lean
     const g=new THREE.BufferGeometry();for(const n of ['position','normal','color','aL'])g.setAttribute(n,geo.getAttribute(n));
     g.setDrawRange(start,end-start);g.boundingSphere=sph;
-    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;scene.add(m);
+    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;m.castShadow=m.receiveShadow=true;m.customDepthMaterial=depthMat;scene.add(m);
     tiles.push({m,g,sph});
     i=j}
 }
@@ -441,6 +468,39 @@ $('#rst').onclick=()=>{for(let k=0;k<nB;k++){bAlive[k]=1;bHp[k]=bMax[k];wallC[k]
   resetTrees();collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
 $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
 
+// ---------- map labels: real names from OSM (SCAD buildings, squares and parks, the river) ----------
+// Screen-space HTML tags, placed every other frame. Nearer and more important labels win; overlapping ones hide.
+const LBL={items:[],pool:[],max:innerWidth<=600?14:28,tick:0,v:new THREE.Vector3()};
+function buildLabels(D){
+  for(const k of scadIdx)if(bName[k])LBL.items.push({kind:'scad',k,x:bX[k],z:bZ[k],text:bName[k],range:1100,pri:0});
+  for(const [x,z,name,area] of D.pn||[])LBL.items.push({kind:'park',k:-1,x,z,y:2,text:name,range:area>20000?2200:800,pri:area>20000?1:2});
+  // the river label sits on the river outline point nearest downtown
+  if(D.river&&D.river.length){const c=centerOf(ZONES[0][1])||{x:0,z:0};let best=0,bd=1e18;
+    for(let i=0;i<D.river.length;i+=2){const d=(D.river[i]-c.x)**2+(D.river[i+1]-c.z)**2;if(d<bd){bd=d;best=i}}
+    LBL.items.push({kind:'water',k:-1,x:D.river[best]+20,z:D.river[best+1]-60,y:1,text:'Savannah River',range:3000,pri:1})}
+}
+function placeLabels(){
+  if(!LBL.items.length||(++LBL.tick&1))return;
+  const W=innerWidth,H=innerHeight,cam=camera.position,cand=[];
+  for(const it of LBL.items){const d=Math.hypot(it.x-cam.x,it.z-cam.z);if(d>it.range)continue;
+    LBL.v.set(it.x,it.kind==='scad'?(bAlive[it.k]?bH[it.k]+3:3):it.y,it.z).project(camera);
+    if(LBL.v.z>1||LBL.v.x<-1.1||LBL.v.x>1.1||LBL.v.y<-1.1||LBL.v.y>1.1)continue;
+    cand.push({it,sx:(LBL.v.x*.5+.5)*W,sy:(-LBL.v.y*.5+.5)*H,score:it.pri*600+d})}
+  cand.sort((a,b)=>a.score-b.score);
+  // keep tags off the HUD: score bar + zone chips at the top, weapon dock, open building list
+  const used=[];let n=0;LBL.max=W<=600||H<=500?14:28;
+  for(const s of ['#top','#zones','#dock','#list.open','#toast.on']){const e=document.querySelector(s);if(!e)continue;const r=e.getBoundingClientRect();if(r.width)used.push([r.left-4,r.top-4,r.right+4,r.bottom+4])}
+  for(const c of cand){if(n>=LBL.max)break;
+    const w=c.it.text.length*7+16,h=22,x0=c.sx-w/2,y0=c.sy-h-6;
+    if(used.some(r=>x0<r[2]&&x0+w>r[0]&&y0<r[3]&&y0+h>r[1]))continue;used.push([x0,y0,x0+w,y0+h]);
+    let el=LBL.pool[n];if(!el){el=document.createElement('div');$('#labels').appendChild(el);LBL.pool[n]=el}
+    const dead=c.it.kind==='scad'&&!bAlive[c.it.k],cls='lb '+c.it.kind+(dead?' dead':'');
+    if(el.className!==cls)el.className=cls;if(el.textContent!==c.it.text)el.textContent=c.it.text;
+    el.style.display='';el.style.transform=`translate(${c.sx.toFixed(1)}px,${(c.sy-(c.it.kind==='scad'?6:0)).toFixed(1)}px) translate(-50%,-100%)`;n++}
+  for(let i=n;i<LBL.pool.length;i++)LBL.pool[i].style.display='none';
+  LBL.shown=n;
+}
+
 // ---------- toast ----------
 let toastT=0;
 function toast(msg,action,ms=3500){const t=$('#toast');t.textContent=msg;
@@ -499,16 +559,19 @@ function loop(now){requestAnimationFrame(loop);const f0=performance.now();const 
   for(let i=FX.length-1;i>=0;i--){const f=FX[i];f.t+=dt;const u=Math.min(1,f.t/f.dur);f.f(u);if(u>=1){f.end();FX.splice(i,1)}}
   if(geo){stepProjectiles(dt);stepQuake(dt);stepParticles(dt);flushAttrs()}
   const t=now/1000;for(const b of document.querySelectorAll('.wp')){const w=WEAPONS.find(x=>x.id==b.dataset.w);const rem=(cool[w.id]||0)-t;b.classList.toggle('wait',rem>0);b.querySelector('.cd').style.width=rem>0&&w.cd?rem/w.cd*100+'%':'0'}
+  if(ready)placeLabels();
   if(hudDirty){hudDirty=false;hud()}
   if(combo>1&&t-lastKill>2.2){combo=1;$('#combo').style.opacity=0}
+  updateSun();
   const f1=performance.now();renderer.render(scene,camera);
   if(PERF){const f2=performance.now();if(frRec)FR.push([now,f1-f0,f2-f1]);if(geo&&!PT.firstRender){renderer.getContext().readPixels(0,0,1,1,6408,5121,new Uint8Array(4));PT.firstRender=performance.now();PT.firstRenderCall=f2-f1}}}
 requestAnimationFrame(loop);
 
 PT.fetchStart=performance.now();
 fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(D=>{
-  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();hud();
-  const c=centerOf(ZONES[0][1]);if(c){controls.target.set(c.x,0,c.z);camera.position.set(c.x+250,320,c.z+400)}
+  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();buildLabels(D);hud();
+  // opening view: downtown SCAD buildings. A tall, narrow phone screen sees less across, so pull back a little.
+  const c=centerOf(ZONES[0][1]);if(c){const f=innerWidth<innerHeight?1.45:1;controls.target.set(c.x,0,c.z);camera.position.set(c.x+250*f,320*f,c.z+400*f)}
   ready=true;const g=$('#go');g.disabled=false;g.textContent='Start smashing';
   $('#load').textContent=nB.toLocaleString()+' buildings, '+scadIdx.length+' SCAD · '+st.shaped+' mapped roof shapes · heights: '+st.tagged+' mapped, '+st.lidar.toLocaleString()+' from lidar'+(D.t?' · '+D.t.length+' trees':'');
   if(PERF)window.__smash={PT,FR,rec(on){frRec=on;if(on)FR.length=0},
@@ -527,6 +590,8 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
       geo.setDrawRange(0,Infinity);scene.remove(city);for(const t of tiles)t.m.visible=true;renderer.setSize(sz.x,sz.y,false);t.sort((a,b)=>a-b);return t[t.length>>1]},
     hitK(k,amt,paint){return hit(k,amt,paint)},
     layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
+    labels(){return LBL.pool.slice(0,LBL.shown||0).map(e=>e.textContent)},
+    shadows(on){if(on!==undefined)setShadows(on);return shadowsOn},
     me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
     loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
     // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer

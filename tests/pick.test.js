@@ -41,7 +41,13 @@ test('BVH raycast hits the same triangles as brute force (400 camera rays)', () 
     // methods may report a different number of those duplicates. Compare unique (distance, building) pairs.
     const key = hs => [...new Set(hs.map(h => `${Math.round(h.distance * 1e3)}:${FB[h.faceIndex]}`))].sort();
     assert.deepStrictEqual(key(b), key(a), `ray ${i}`);
-    if (a.length) assert.strictEqual(FB[b[0].faceIndex], FB[a[0].faceIndex], `ray ${i} first building`);
+    // the nearest hit: same distance, and BVH's building is one of those hit at that distance (two buildings that
+    // share a party wall are hit at exactly the same distance, and either answer is right)
+    if (a.length) {
+      assert.ok(Math.abs(b[0].distance - a[0].distance) < 1e-3, `ray ${i} nearest distance`);
+      const tied = new Set(a.filter(h => Math.abs(h.distance - a[0].distance) < 1e-3).map(h => FB[h.faceIndex]));
+      assert.ok(tied.has(FB[b[0].faceIndex]), `ray ${i} first building`);
+    }
     hits += a.length > 0;
   }
   assert.ok(hits >= 200, `only ${hits} rays hit a building`);
