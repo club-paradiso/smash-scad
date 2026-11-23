@@ -49,6 +49,11 @@ for (const [w, h, mobile] of [[1280, 800, false], [390, 844, true]]) {
     await page.waitForTimeout(800);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${tag}-loaded.png` });
   });
+  await step('aerial photo tiles load (ground + roofs)', async () => {
+    await page.waitForFunction(() => __smash.aerial().loaded >= 10, null, { timeout: 90000, polling: 250 });
+    const a = await page.evaluate(() => __smash.aerial());
+    assert.equal(a.tiles, 56);
+  });
   await step('real names on the map: SCAD buildings and Savannah squares', async () => {
     await page.waitForFunction(() => __smash.labels().length > 3, null, { timeout: 30000 });
     const names = await page.evaluate(() => __smash.labels());

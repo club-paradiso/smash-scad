@@ -95,7 +95,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
 #gps.wait svg{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 #list .grab{display:none}
-#hint .short{display:none}
+#hint .short,#credit .short{display:none}
 /* phones: building list becomes a bottom sheet, thumb-reachable */
 @media(max-width:600px){
   #list{top:auto;left:0;right:0;width:auto;height:min(72dvh,560px);border-radius:18px 18px 0 0;transform:translateY(105%);padding:8px 14px calc(env(safe-area-inset-bottom) + 10px)}
@@ -103,7 +103,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--y);outline-offs
   #list .grab{display:block;width:44px;height:5px;border-radius:3px;background:#555;margin:2px auto 4px}
   #bl button{min-height:48px}
   #list.glass{background:rgba(13,13,13,.97)}
-  #meta .long,#hint .long{display:none}#hint .short{display:inline}
+  #meta .long,#hint .long,#credit .long{display:none}#hint .short,#credit .short{display:inline}
 }
 /* phones in landscape: short screen, so slimmer HUD and the weapon dock moves to the right edge */
 @media(max-height:500px) and (orientation:landscape){
@@ -152,7 +152,7 @@ canvas#c{-webkit-touch-callout:none}
 <div id="zones"></div>
 <div id="hint" class="glass"><span class="long">Tap a building to attack · drag to move · two fingers to rotate / zoom</span><span class="short">Tap to attack · drag to move · pinch to zoom</span></div>
 <div id="dock" class="glass"></div>
-<div id="credit">Map data © OpenStreetMap contributors (ODbL) · Heights: USGS 3DEP lidar</div>
+<div id="credit">© OpenStreetMap contributors (ODbL)<span class="long"> · Heights: USGS 3DEP lidar · Imagery: USDA NAIP</span><span class="short"> · USGS · NAIP</span></div>
 
 <div id="toast" class="glass" role="status" aria-live="polite"></div>
 <aside id="list" class="glass" aria-label="SCAD buildings">
