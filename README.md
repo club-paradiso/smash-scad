@@ -36,7 +36,8 @@ Vite 프로젝트다. 루트는 `web/`이고 three.js는 npm 패키지(정확한
 ```bash
 npm run data                               # OSM 다시 받기 + 지면 + 건물
 pip install -r tools/requirements.txt      # 라이다 단계에만 필요 (numpy, scipy, laspy, triangle)
-npm run data:lidar                         # 라이다 받기(약 360MB) + 높이 측정 + 건물 다시 빌드
+npm run data:aerial                        # NAIP 항공사진 받기 + 타일 자르기 (rasterio, pyproj 필요)
+npm run data:lidar                         # 라이다 받기(약 360MB) + 높이·형태·수관 측정 + 건물 다시 빌드 (수관 색에 항공사진 필요)
 ```
 
 | 단계 | 스크립트 | 결과물 |
