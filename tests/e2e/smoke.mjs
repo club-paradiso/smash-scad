@@ -39,7 +39,10 @@ for (const [w, h, mobile] of [[1280, 800, false], [390, 844, true]]) {
     try { await fn(); console.log(`ok   ${tag} ${name}`) } catch (e) { failed++; console.log(`FAIL ${tag} ${name}: ${e.message.split('\n')[0]}`) }
   };
   await step('loads map', async () => {
-    await page.goto(URL_ + sep + 'perf');
+    // shadows off: with them, SwiftShader at 1280 px runs ~2 FPS, and Playwright sends mouse-up only after mouse-down
+    // has been handled, so the press lasts a whole frame (>450 ms) and stops counting as a tap. Real taps carry
+    // hardware timestamps and are not affected; the game also drops shadows by itself when frames are that slow.
+    await page.goto(URL_ + sep + 'perf&shadows=0');
     await page.waitForFunction(() => window.__smash && __smash.PT.firstRender, null, { timeout: 180000, polling: 200 });
     assert.equal(await page.textContent('#go'), 'Start smashing');
     assert.match(await page.textContent('#load'), /4,497 buildings, 71 SCAD/);
@@ -74,6 +77,10 @@ for (const [w, h, mobile] of [[1280, 800, false], [390, 844, true]]) {
     await page.waitForFunction(d => __smash.dmg() > d, d0, { timeout: 90000, polling: 100 });
     if (SHOTS && (id === 'paint' || id === 'nuke')) await page.screenshot({ path: `${SHOTS}/${tag}-${id}.png` });
   });
+  await step('blasts knock down lidar tree crowns', async () => {
+    const c = await page.evaluate(() => __smash.canopy());
+    assert.ok(c.n > 10000, `crowns ${c.n}`); assert.ok(c.down > 0, 'no crown knocked down by the weapons');
+  });
   await step('rank and score update', async () => {
     assert.notEqual(await page.textContent('#score'), '0');
     assert.match(await page.textContent('#lev'), /^\d+\/71$/);
@@ -95,6 +102,7 @@ for (const [w, h, mobile] of [[1280, 800, false], [390, 844, true]]) {
     await page.click('#rst');
     const s = await page.evaluate(() => ({ alive: __smash.alive(), n: __smash.nB(), dmg: __smash.dmg() }));
     assert.equal(s.alive, s.n); assert.equal(s.dmg, 0);
+    assert.equal((await page.evaluate(() => __smash.canopy())).down, 0, 'crowns stand again after rebuild');
     assert.equal(await page.textContent('#score'), '0');
     assert.equal(await page.textContent('#lev'), '0/71');
   });

@@ -234,7 +234,22 @@ old = json.load(open('data/ground.json'))
 # trees: [x, z, leaf(1 needle), height m, crown radius m]; height/radius 0 = lidar found no canopy there
 LT = json.load(open('data/lidar_heights.json'))['t'] if os.path.exists('data/lidar_heights.json') else {}
 trees = [t + LT.get(f'{t[0]},{t[1]}', [0, 0]) for t in old['t']]
-D = {'v': 3, 'b': out, 't': trees, **{k: old[k] for k in ('r', 'p', 'w', 'river', 'tr', 'f', 'rl', 'pl', 'a', 'pn')}}
+# lidar crowns (tools/lidar_canopy.py): [x, z, top, base, radius, r, g, b]. OSM trees standing inside a crown are the
+# same tree, so they are dropped; OSM trees the lidar did not pick up as a crown stay.
+CC = json.load(open('data/lidar_canopy.json'))['c'] if os.path.exists('data/lidar_canopy.json') else []
+if CC:
+    cell = {}
+    for i, q in enumerate(CC): cell.setdefault((int(q[0] // 20), int(q[1] // 20)), []).append(i)
+    def in_crown(x, z):
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for i in cell.get((int(x // 20) + dx, int(z // 20) + dz), []):
+                    q = CC[i]
+                    if (q[0] - x) ** 2 + (q[1] - z) ** 2 <= q[4] ** 2: return True
+        return False
+    n0 = len(trees); trees = [t for t in trees if not in_crown(t[0], t[1])]
+    print('OSM trees', n0, 'kept outside lidar crowns', len(trees), '| lidar crowns', len(CC))
+D = {'v': 3, 'b': out, 't': trees, 'cc': CC, **{k: old[k] for k in ('r', 'p', 'w', 'river', 'tr', 'f', 'rl', 'pl', 'a', 'pn')}}
 json.dump(D, open('web/public/scad-savannah.json', 'w'), separators=(',', ':'))
 print('buildings', len(out), 'scad', sum(o[0] for o in out), stats)
 import collections
