@@ -1,0 +1,195 @@
+{
+ "label": "12b-canopy-390x844",
+ "date": "2026-11-23T03:28:21.035Z",
+ "env": {
+  "browser": "Chromium 157.0.8103.78 (Playwright, headless)",
+  "viewport": "390x844 @1x",
+  "gl": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+ },
+ "runs": 2,
+ "summary": {
+  "load": {
+   "fetch_ms": 256.4,
+   "ground_ms": 66.3,
+   "city_ms": 287.7,
+   "extra_init_ms": 106.8,
+   "first_render_ms": 377.2,
+   "first_render_call_ms": 68.9,
+   "total_ms": 1412.3
+  },
+  "idle": {
+   "frames": 40,
+   "fps": 7.85,
+   "js_med": 0.2,
+   "js_p95": 0.6,
+   "render_med": 0.9,
+   "render_p95": 2.6,
+   "render_max": 5.4,
+   "calls": 68,
+   "triangles": 116184,
+   "verts": 508482,
+   "tiles": 54
+  },
+  "pick": {
+   "n": 200,
+   "hit_building": 93,
+   "med_ms": 0,
+   "p95_ms": 0.1,
+   "max_ms": 1.1
+  },
+  "nuke": {
+   "frames": 26,
+   "fps": 6.25,
+   "js_med": 1,
+   "js_p95": 2.8,
+   "render_med": 1.4,
+   "render_p95": 2.4,
+   "render_max": 3.7,
+   "killed": 203
+  },
+  "quake": {
+   "frames": 28,
+   "fps": 6.89,
+   "js_med": 1.1,
+   "js_p95": 4,
+   "render_med": 1.1,
+   "render_p95": 2.2,
+   "render_max": 4.2,
+   "killed": 112
+  },
+  "upload": {
+   "clean_ms": 74,
+   "dirty1_ms": 77.3,
+   "dirty200_near_ms": 73.9,
+   "dirty200_spread_ms": 78.6,
+   "dirty_all_ms": 80.4
+  }
+ },
+ "raw": {
+  "load": [
+   {
+    "fetch_ms": 256.4,
+    "ground_ms": 66.3,
+    "city_ms": 287.7,
+    "extra_init_ms": 106.8,
+    "first_render_ms": 377.2,
+    "first_render_call_ms": 68.9,
+    "total_ms": 1412.3
+   },
+   {
+    "fetch_ms": 243.4,
+    "ground_ms": 62.6,
+    "city_ms": 238.1,
+    "extra_init_ms": 65.7,
+    "first_render_ms": 313,
+    "first_render_call_ms": 61.7,
+    "total_ms": 1212.9
+   }
+  ],
+  "idle": [
+   {
+    "frames": 40,
+    "fps": 7.85,
+    "js_med": 0.2,
+    "js_p95": 0.4,
+    "render_med": 0.9,
+    "render_p95": 2.6,
+    "render_max": 5.4,
+    "calls": 68,
+    "triangles": 116184,
+    "verts": 508482,
+    "tiles": 54
+   },
+   {
+    "frames": 39,
+    "fps": 7.78,
+    "js_med": 0.2,
+    "js_p95": 0.6,
+    "render_med": 0.8,
+    "render_p95": 1.5,
+    "render_max": 2.2,
+    "calls": 68,
+    "triangles": 116184,
+    "verts": 508482,
+    "tiles": 54
+   }
+  ],
+  "pick": [
+   {
+    "n": 200,
+    "hit_building": 93,
+    "med_ms": 0,
+    "p95_ms": 0.1,
+    "max_ms": 0.9
+   },
+   {
+    "n": 200,
+    "hit_building": 93,
+    "med_ms": 0,
+    "p95_ms": 0.1,
+    "max_ms": 1.1
+   }
+  ],
+  "nuke": [
+   {
+    "frames": 26,
+    "fps": 6.25,
+    "js_med": 1,
+    "js_p95": 2.8,
+    "render_med": 1.3,
+    "render_p95": 1.6,
+    "render_max": 3.7,
+    "killed": 203
+   },
+   {
+    "frames": 25,
+    "fps": 6.08,
+    "js_med": 0.9,
+    "js_p95": 2.1,
+    "render_med": 1.4,
+    "render_p95": 2.4,
+    "render_max": 2.6,
+    "killed": 203
+   }
+  ],
+  "quake": [
+   {
+    "frames": 28,
+    "fps": 6.89,
+    "js_med": 1.1,
+    "js_p95": 4,
+    "render_med": 1,
+    "render_p95": 1.5,
+    "render_max": 4.2,
+    "killed": 112
+   },
+   {
+    "frames": 27,
+    "fps": 6.53,
+    "js_med": 1,
+    "js_p95": 3.4,
+    "render_med": 1.1,
+    "render_p95": 2.2,
+    "render_max": 2.3,
+    "killed": 99
+   }
+  ],
+  "upload": [
+   {
+    "clean_ms": 74,
+    "dirty1_ms": 77.3,
+    "dirty200_near_ms": 73.9,
+    "dirty200_spread_ms": 77.2,
+    "dirty_all_ms": 76.9
+   },
+   {
+    "clean_ms": 73.5,
+    "dirty1_ms": 73.8,
+    "dirty200_near_ms": 71.3,
+    "dirty200_spread_ms": 78.6,
+    "dirty_all_ms": 80.4
+   }
+  ]
+ },
+ "console_errors": []
+}

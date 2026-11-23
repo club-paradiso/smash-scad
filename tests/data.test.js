@@ -8,7 +8,7 @@ const L = JSON.parse(readFileSync(new URL('../data/lidar_heights.json', import.m
 
 test('schema v3 has every layer', () => {
   assert.strictEqual(D.v, 3);
-  for (const k of ['b', 'r', 'p', 'w', 'river', 't', 'tr', 'f', 'rl', 'pl', 'a', 'pn']) assert.ok(Array.isArray(D[k]), k);
+  for (const k of ['b', 'r', 'p', 'w', 'river', 't', 'tr', 'f', 'rl', 'pl', 'a', 'pn', 'cc']) assert.ok(Array.isArray(D[k]), k);
 });
 
 test('height source flags are 0 tagged, 1 estimated, 2 lidar height, 3 lidar shape; lidar heights only on untagged flat roofs', () => {
@@ -60,5 +60,14 @@ test('measured shapes: valid indices, outline rings match the footprint, roof co
       roof += Math.abs((v[c] - v[a]) * (v[d + 1] - v[a + 1]) - (v[d] - v[a]) * (v[c + 1] - v[a + 1])) / 2 }
     const want = area(b[2]) - b[3].reduce((s, h) => s + area(h), 0);
     assert.ok(Math.abs(roof / want - 1) < 0.03, `${b[1]} roof ${roof.toFixed(0)} vs footprint ${want.toFixed(0)}`);
+  }
+});
+
+test('lidar tree crowns: measured sizes, green photo colour, not on buildings', () => {
+  assert.strictEqual(D.cc.length, 15810);   // 2026-11-23 build: 19,997 tops - 2,295 on buildings - 1,892 not green in 2023
+  for (const [x, z, top, base, r, R, G, B] of D.cc) {
+    assert.ok(Number.isFinite(x) && Number.isFinite(z));
+    assert.ok(top >= 4 && top <= 45 && base >= 1.5 && base < top && r >= 1.2 && r <= 20, `${top} ${base} ${r}`);
+    assert.ok(2 * G - R - B >= 15, `colour ${R},${G},${B}`);
   }
 });

@@ -59,6 +59,7 @@ function adaptResolution(ms){
   const avg=adapt.acc/adapt.n;adapt.acc=adapt.n=0;
   if(avg>24&&dpr>1){dpr=Math.max(1,+(dpr-.25).toFixed(2));adapt.good=0;applyDpr()}
   else if(avg>34&&dpr<=1&&shadowsOn&&qs.get('shadows')!=='1'){setShadows(false);adapt.good=0} // still slow at the lowest resolution: drop shadows
+  else if(avg>45&&dpr<=1&&!shadowsOn&&canopyOn&&CAN.tiles.length&&qs.get('trees')!=='1'){setCanopy(false);adapt.good=0} // then the lidar tree crowns
   else if(avg<13&&dpr<DPR_MAX){if(++adapt.good>=4){dpr=Math.min(DPR_MAX,+(dpr+.25).toFixed(2));adapt.good=0;applyDpr()}}
   else adapt.good=0;
 }
@@ -152,7 +153,42 @@ function buildGroundLayers(D){
   }
   groundFinish();
   if(D.v>=3)buildTrees(D.t);
+  if(D.cc)buildCanopy(D.cc);
 }
+// ---------- lidar tree crowns (tools/lidar_canopy.py): [x, z, top, base, radius, r, g, b] ----------
+// crowns measured from the 2018 lidar, coloured from the 2023 aerial photo. Each is a 16-triangle dome
+// (smooth-shaded) scaled to its measured radius, top and crown base. One InstancedMesh per 400 m tile so tiles
+// off screen are culled. Blasts flatten and char them like the OSM trees; rebuild stands them up again.
+const CAN={tiles:[],n:0};
+// ?trees=0 hides the crowns, ?trees=1 keeps them even on a slow device; otherwise they go if frames stay slow
+// after resolution and shadows have already been dropped (see adaptResolution)
+let canopyOn=qs.get('trees')!=='0';
+function setCanopy(on){canopyOn=on;for(const t of CAN.tiles)t.m.visible=on}
+function domeGeometry(){ // 16 triangles; normals point out from the centre so it shades like a smooth ellipsoid
+  const S=8,v=[0,1,0];for(let i=0;i<S;i++){const a=i/S*Math.PI*2;v.push(Math.cos(a),.15,Math.sin(a))}v.push(0,-.75,0);
+  const idx=[];for(let i=0;i<S;i++){const a=1+i,b=1+(i+1)%S;idx.push(0,b,a,S+1,a,b)}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setIndex(idx);
+  const n=[];for(let i=0;i<v.length;i+=3){const l=Math.hypot(v[i],v[i+1]*1.4,v[i+2])||1;n.push(v[i]/l,v[i+1]*1.4/l,v[i+2]/l)}
+  g.setAttribute('normal',new THREE.Float32BufferAttribute(n,3));return g}
+function placeCrown(t,i,down){
+  const [x,z,top,base,r]=t.c[i],sy=Math.max(.5,(top-base)/1.75);
+  if(down){dummy.position.set(x,.6,z);dummy.scale.set(r*.9,.5,r*.9)}else{dummy.position.set(x,base+.75*sy,z);dummy.scale.set(r,sy,r)}
+  dummy.rotation.set(0,(i*1.3)%6.28,0);dummy.updateMatrix();t.m.setMatrixAt(i,dummy.matrix);
+  const q=t.c[i];tmpA.setRGB(q[5]/255*1.1,q[6]/255*1.1,q[7]/255*1.1);if(down)tmpA.lerp(CHAR,.75);t.m.setColorAt(i,tmpA);
+  t.m.instanceMatrix.needsUpdate=true;t.m.instanceColor.needsUpdate=true}
+function buildCanopy(cc){
+  const geo0=domeGeometry(),mat=new THREE.MeshLambertMaterial(),by=new Map();
+  for(const q of cc){const k=Math.floor((q[1]+TILE_OFF)/TILE)*1000+Math.floor((q[0]+TILE_OFF)/TILE);if(!by.has(k))by.set(k,[]);by.get(k).push(q)}
+  for(const c of by.values()){
+    const m=new THREE.InstancedMesh(geo0,mat,c.length);m.name='canopy';m.castShadow=true;m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(c.length*3),3);
+    const t={m,c,down:new Uint8Array(c.length)};for(let i=0;i<c.length;i++)placeCrown(t,i,0);
+    m.computeBoundingSphere();m.boundingSphere.radius+=20;m.visible=canopyOn;scene.add(m);CAN.tiles.push(t);CAN.n+=c.length}
+}
+function blastCanopy(x,z,r){for(const t of CAN.tiles){const s=t.m.boundingSphere;if(Math.hypot(s.center.x-x,s.center.z-z)>s.radius+r)continue;
+  for(let i=0;i<t.c.length;i++)if(!t.down[i]&&Math.hypot(t.c[i][0]-x,t.c[i][1]-z)<r){t.down[i]=1;placeCrown(t,i,1)}}}
+function resetCanopy(){for(const t of CAN.tiles)for(let i=0;i<t.c.length;i++)if(t.down[i]){t.down[i]=0;placeCrown(t,i,0)}}
+
 // flat ribbon of half-width `half` along a polyline, pushed into `out` as triangles at height y
 function strip(f,half,y,out){
   for(let i=0;i+3<f.length;i+=2){const x1=f[i],z1=f[i+1],x2=f[i+2],z2=f[i+3];const dx=x2-x1,dz=z2-z1;const L=Math.hypot(dx,dz)||1;const nx=-dz/L*half,nz=dx/L*half;
@@ -188,8 +224,8 @@ function placeTree(i,fall){ // fall 0 = standing, 1 = knocked flat and charred
   dummy.updateMatrix();m.setMatrixAt(s,dummy.matrix);m.setColorAt(s,fall?tmpA.copy(c).lerp(CHAR,.8):c);
   trees.trunk.instanceMatrix.needsUpdate=m.instanceMatrix.needsUpdate=m.instanceColor.needsUpdate=true;
 }
-function blastTrees(x,z,r){if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
-function resetTrees(){if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
+function blastTrees(x,z,r){blastCanopy(x,z,r);if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
+function resetTrees(){resetCanopy();if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
 const TILE=400,TILE_OFF=4000,tiles=[];let depthMat=null,aerialRoof=null;
 const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
@@ -444,9 +480,11 @@ function stepQuake(dt){if(!quake)return;quake.t+=dt;shake(dt*30);
 // ---------- input ----------
 const ray=new THREE.Raycaster(),ndc=new THREE.Vector2(),gplane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
 let down=null,pointers=0;
-canvas.addEventListener('pointerdown',e=>{pointers++;down=pointers==1?{x:e.clientX,y:e.clientY,t:performance.now(),b:e.button}:null});
+// tap = press and release within 450 ms; measured with the events' own timestamps, so a slow frame between the
+// two handlers (weak phone) does not turn a tap into a drag
+canvas.addEventListener('pointerdown',e=>{pointers++;down=pointers==1?{x:e.clientX,y:e.clientY,t:e.timeStamp,b:e.button}:null});
 addEventListener('pointerup',e=>{pointers=Math.max(0,pointers-1);if(!down||!ready)return;const d=down;down=null;
-  if(e.target!==canvas||d.b!==0||Math.hypot(e.clientX-d.x,e.clientY-d.y)>9||performance.now()-d.t>450)return;
+  if(e.target!==canvas||d.b!==0||Math.hypot(e.clientX-d.x,e.clientY-d.y)>9||e.timeStamp-d.t>450)return;
   const r=pickAt(e.clientX,e.clientY);if(!r)return;
   audio();fire(r.pt,r.k);hideHint()});
 function pickAt(cx,cy){
@@ -625,6 +663,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
     layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
     labels(){return LBL.pool.slice(0,LBL.shown||0).map(e=>e.textContent)},
     shadows(on){if(on!==undefined)setShadows(on);return shadowsOn},
+    canopy(on){if(on!==undefined)setCanopy(on);let d=0;for(const t of CAN.tiles)for(const v of t.down)d+=v;return {n:CAN.n,tiles:CAN.tiles.length,down:d,on:canopyOn}},
     aerial(){return {tiles:AER.planes.size,loaded:AER.loaded}},
     me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
     loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
