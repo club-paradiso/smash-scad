@@ -190,7 +190,7 @@ function placeTree(i,fall){ // fall 0 = standing, 1 = knocked flat and charred
 }
 function blastTrees(x,z,r){if(!trees)return;for(let i=0;i<trees.n;i++)if(!trees.down[i]&&Math.hypot(trees.x[i]-x,trees.z[i]-z)<r){trees.down[i]=1;placeTree(i,1)}}
 function resetTrees(){if(!trees)return;for(let i=0;i<trees.n;i++)if(trees.down[i]){trees.down[i]=0;placeTree(i,0)}}
-const TILE=400,TILE_OFF=4000,tiles=[];let depthMat=null;
+const TILE=400,TILE_OFF=4000,tiles=[];let depthMat=null,aerialRoof=null;
 const tileOf=k=>Math.floor((bZ[k]+TILE_OFF)/TILE)*1000+Math.floor((bX[k]+TILE_OFF)/TILE);
 function buildCity(D){
   const B=D.b;nB=B.length;
@@ -211,7 +211,9 @@ function buildCity(D){
     // Walls: OSM building:colour if tagged, else the same neutral stone/stucco range for every building (SCAD included;
     // there is no data on real facade colours). SCAD buildings are marked by a yellow roof and their name tag.
     const w=tw||new THREE.Color().setHSL(.08+v*.05,.18+v*.12,.78+v*.1);
-    const rf=s?new THREE.Color().setHSL(.125,.8,.52+v*.04):(tr||(rec[7]?new THREE.Color().setHSL(.03+v*.04,.35,.42+v*.1):w.clone().multiplyScalar(.86)));
+    // Roofs show the 2023 NAIP aerial photo (see aerialRoof in buildCity); the vertex colour is a multiplier on it:
+    // white for most roofs, a yellow tint for SCAD (the target marker). Damage and paint keep working on top.
+    const rf=s?new THREE.Color(1,.86,.42):new THREE.Color(1,1,1);
     baseW[k]=w;baseR[k]=rf;wallC[k]=w.clone();roofC[k]=rf.clone();
     G[k]=g;
   }
@@ -236,6 +238,13 @@ function buildCity(D){
   const mat=new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide});
   const collapse=sh=>{sh.vertexShader='attribute vec3 aL;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed.y*=aL.x;transformed.x+=aL.y*transformed.y;transformed.z+=aL.z*transformed.y;')};
   mat.onBeforeCompile=collapse;
+  // per-tile materials: same shader (one program), each with the aerial texture of its own 400 m tile.
+  // Roof = fragment whose world normal points up (y > .35); its colour = photo pixel straight below x multiplier.
+  // Until a tile's photo arrives (or if it never does) roofs use a neutral grey instead.
+  aerialRoof=uni=>sh=>{collapse(sh);Object.assign(sh.uniforms,uni);
+    sh.vertexShader='varying vec3 vAerW;varying float vAerNy;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvAerW=(modelMatrix*vec4(position,1.)).xyz;vAerNy=normalize((modelMatrix*vec4(objectNormal,0.)).xyz).y;');
+    sh.fragmentShader='uniform sampler2D uAer;uniform float uAerOn;uniform vec2 uAerO;uniform float uAerS;varying vec3 vAerW;varying float vAerNy;\n'+sh.fragmentShader.replace('#include <color_fragment>',
+      '#include <color_fragment>\nif(abs(vAerNy)>.35){vec3 aer=uAerOn>.5?texture2D(uAer,(vec2(0.,1.)+vec2(1.,-1.)*clamp((vAerW.xz-uAerO)/uAerS,0.,1.))).rgb*1.12:vec3(.6,.58,.55);diffuseColor.rgb*=aer;}')};
   // the shadow pass draws with a depth material; give it the same collapse so falling buildings' shadows shrink too
   depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking,side:THREE.DoubleSide});depthMat.onBeforeCompile=collapse;
   city=new THREE.Mesh(geo,mat);buildTiles(order,mat);
@@ -258,8 +267,10 @@ function buildTiles(order,mat){
     const sph=box.getBoundingSphere(new THREE.Sphere());sph.radius+=box.max.y*.25; // room for a collapsing building's lean
     const g=new THREE.BufferGeometry();for(const n of ['position','normal','color','aL'])g.setAttribute(n,geo.getAttribute(n));
     g.setDrawRange(start,end-start);g.boundingSphere=sph;
-    const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;m.castShadow=m.receiveShadow=true;m.customDepthMaterial=depthMat;scene.add(m);
-    tiles.push({m,g,sph});
+    const uni={uAer:{value:null},uAerOn:{value:0},uAerO:{value:new THREE.Vector2()},uAerS:{value:1}};
+    const tm=mat.clone();tm.onBeforeCompile=aerialRoof(uni);tm.customProgramCacheKey=()=>'city-aerial';
+    const m=new THREE.Mesh(g,tm);m.matrixAutoUpdate=false;m.castShadow=m.receiveShadow=true;m.customDepthMaterial=depthMat;scene.add(m);
+    tiles.push({m,g,sph,key,uni});
     i=j}
 }
 function paintB(k){
@@ -468,6 +479,28 @@ $('#rst').onclick=()=>{for(let k=0;k<nB;k++){bAlive[k]=1;bHp[k]=bMax[k];wallC[k]
   resetTrees();collapsing.length=0;D_.length=0;P_.length=0;quake=null;score=0;combo=1;hud()};
 $('#go').onclick=()=>{$('#intro').style.display='none';audio()};
 
+// ---------- aerial photo (USDA NAIP 2023, public domain): ground planes + roof texture ----------
+// web/public/aerial/t_<ix>_<iz>.jpg: one per 400 m building tile, with `pad` metres of overlap. Loaded nearest
+// first, a few at a time, so the game is playable at once; until a tile arrives the vector ground layers show.
+const AER={idx:null,planes:new Map(),loaded:0};
+async function loadAerial(){
+  try{const r=await fetch(import.meta.env.BASE_URL+'aerial/index.json');if(!r.ok)return;AER.idx=await r.json()}catch(e){return}
+  const {tile,off,pad,px}=AER.idx,size=tile+2*pad,loader=new THREE.TextureLoader(),aniso=Math.min(4,renderer.capabilities.getMaxAnisotropy());
+  for(const [ix,iz] of AER.idx.tiles){
+    const g=new THREE.PlaneGeometry(tile,tile);g.rotateX(-Math.PI/2);
+    const uv=g.attributes.uv;for(let i=0;i<uv.count;i++)uv.setXY(i,(pad+uv.getX(i)*tile)/size,1-(pad+(1-uv.getY(i))*tile)/size);
+    const p=new THREE.Mesh(g,new THREE.MeshBasicMaterial({fog:true}));p.position.set(ix*tile-off+tile/2,.14,iz*tile-off+tile/2);p.visible=false;p.renderOrder=-1;scene.add(p);
+    AER.planes.set(iz*1000+ix,{p,ix,iz})}
+  const t=controls.target,queue=[...AER.planes.values()].sort((a,b)=>Math.hypot(a.p.position.x-t.x,a.p.position.z-t.z)-Math.hypot(b.p.position.x-t.x,b.p.position.z-t.z));
+  const next=()=>{const q=queue.shift();if(!q)return;
+    loader.load(import.meta.env.BASE_URL+`aerial/t_${q.ix}_${q.iz}.jpg`,tex=>{
+      tex.anisotropy=aniso;tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping;
+      q.p.material.map=tex;q.p.material.needsUpdate=true;q.p.visible=true;AER.loaded++;
+      for(const tt of tiles)if(tt.key===q.iz*1000+q.ix){tt.uni.uAer.value=tex;tt.uni.uAerOn.value=1;tt.uni.uAerO.value.set(q.ix*tile-off-pad,q.iz*tile-off-pad);tt.uni.uAerS.value=size}
+      next()},undefined,()=>next())};
+  for(let i=0;i<4;i++)next();
+}
+
 // ---------- map labels: real names from OSM (SCAD buildings, squares and parks, the river) ----------
 // Screen-space HTML tags, placed every other frame. Nearer and more important labels win; overlapping ones hide.
 const LBL={items:[],pool:[],max:innerWidth<=600?14:28,tick:0,v:new THREE.Vector3()};
@@ -569,7 +602,7 @@ requestAnimationFrame(loop);
 
 PT.fetchStart=performance.now();
 fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new Error(r.status);return r.json()}).then(D=>{
-  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();buildLabels(D);hud();
+  PT.fetched=performance.now();buildGroundLayers(D);PT.ground=performance.now();const st=buildCity(D);PT.city=performance.now();buildLabels(D);hud();loadAerial();
   // opening view: downtown SCAD buildings. A tall, narrow phone screen sees less across, so pull back a little.
   const c=centerOf(ZONES[0][1]);if(c){const f=innerWidth<innerHeight?1.45:1;controls.target.set(c.x,0,c.z);camera.position.set(c.x+250*f,320*f,c.z+400*f)}
   ready=true;const g=$('#go');g.disabled=false;g.textContent='Start smashing';
@@ -592,6 +625,7 @@ fetch(import.meta.env.BASE_URL+'scad-savannah.json').then(r=>{if(!r.ok)throw new
     layer(name,on){let n=0;scene.traverse(o=>{if(o.name===name){o.visible=on;n++}});return n},
     labels(){return LBL.pool.slice(0,LBL.shown||0).map(e=>e.textContent)},
     shadows(on){if(on!==undefined)setShadows(on);return shadowsOn},
+    aerial(){return {tiles:AER.planes.size,loaded:AER.loaded}},
     me(){return {visible:me.visible,x:me.position.x,z:me.position.z}},dpr:()=>dpr,
     loseContext(){renderer.forceContextLoss()},restoreContext(){renderer.forceContextRestore()},
     // render now and read a 9-point grid of pixels before the browser composites (and clears) the buffer

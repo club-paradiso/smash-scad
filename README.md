@@ -100,6 +100,13 @@ SCAD 판정 기준: 이름이나 operator에 SCAD 또는 Savannah College of Art
 
 높이 측정에 쓴 라이다는 USGS 3D Elevation Program(3DEP) 데이터로 미국 정부 공개 자료(public domain)다. 게임 화면에도 출처를 표기한다.
 
+## 항공사진 (USDA NAIP)
+
+- 출처: USDA NAIP 2023-10-17 조지아 촬영(0.6m, 미국 정부 공개 데이터), Microsoft Planetary Computer에서 받는다(`tools/naip_fetch.py`). 게임 좌표(1px = 1m)로 다시 맞췄고 OSM 윤곽과 1~2m 안에서 맞는다
+- `tools/naip_tiles.py`가 건물이 있는 400m 타일 56장으로 자른다(`web/public/aerial/`, 겹침 60m, JPEG 3.0MB)
+- 게임: 땅에 사진을 깔고, 같은 사진을 지붕에 위에서 투영한다. 실제 지붕 색과 옥상 설비가 보인다. 키 큰 건물은 정사영 보정이 지면 기준이라 지붕 사진이 몇 m 밀려 있을 수 있다. 벽면은 사진에 없어 중립색 그대로다
+- 나무 그늘은 사진 속에 납작하게 들어 있다(3D 나무는 OSM 나무 420그루뿐)
+
 ## 내 위치(GPS)
 
 과녁 버튼을 누르면 브라우저 위치 권한을 요청한다. 위치는 기기 안에서 지도 표시에만 쓰고 어디로도 보내지 않는다. 지도 범위 안이면 파란 표시와 정확도 원을 그리고 그쪽으로 카메라가 이동한다. 범위 밖이면 거리만 알려 준다. https 페이지(또는 localhost)에서만 동작한다.
